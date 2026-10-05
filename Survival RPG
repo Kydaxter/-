@@ -1,0 +1,2650 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survival RPG: Pro 3D Game Engine & Level Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050811; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; user-select: none; }
+        #game-container { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        .ui-layer { position: absolute; z-index: 10; pointer-events: none; width: 100vw; height: 100vh; top: 0; left: 0; }
+        .interactive { pointer-events: auto; }
+        
+        #floating-ui-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 5; }
+        .enemy-hp-bar { position: absolute; width: 44px; height: 5px; background: rgba(15,23,42,0.9); border: 1px solid #334155; transform: translate(-50%, -50%); border-radius: 4px; overflow: hidden; display: none; }
+        .enemy-hp-fill { height: 100%; background: #ef4444; width: 100%; transition: width 0.08s ease-out; }
+        .enemy-boss-bar { width: 84px; height: 8px; border-color: #f59e0b; box-shadow: 0 0 10px rgba(245,158,11,0.5); }
+        .enemy-boss-fill { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+
+        .floating-damage { 
+            position: absolute; 
+            transform: translate(-50%, -50%); 
+            font-weight: 900; 
+            font-size: 1.15rem; 
+            text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; 
+            pointer-events: none; 
+            transition: opacity 0.2s;
+        }
+        .damage-crit { font-size: 1.7rem; color: #fbbf24 !important; text-shadow: 0 0 12px #f59e0b, 2px 2px 0 #000; }
+        .damage-heal { font-size: 1.4rem; color: #10b981 !important; text-shadow: 0 0 10px #059669, 2px 2px 0 #000; }
+
+        @keyframes damageFlash { 0% { box-shadow: inset 0 0 0px 0px rgba(255,0,0,0); } 50% { box-shadow: inset 0 0 140px 40px rgba(220,38,38,0.75); } 100% { box-shadow: inset 0 0 0px 0px rgba(255,0,0,0); } }
+        .screen-flash { animation: damageFlash 0.28s ease-out; }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.88);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .scrollable-panel {
+            max-height: calc(100vh - 170px);
+            overflow-y: auto;
+        }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #38bdf8; }
+
+        input[type=range] { accent-color: #38bdf8; cursor: pointer; }
+        input[type=color] { cursor: pointer; background: transparent; border: none; border-radius: 4px; }
+        .engine-tab-active { border-bottom: 2px solid #38bdf8; color: #38bdf8; font-weight: bold; background: rgba(56, 189, 248, 0.08); }
+
+        .upgrade-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .upgrade-card:hover {
+            transform: translateY(-6px) scale(1.02);
+            border-color: #38bdf8;
+            box-shadow: 0 10px 25px -5px rgba(56, 189, 248, 0.3);
+        }
+
+        input[type=file]::file-selector-button {
+            border: none;
+            background: #2563eb;
+            padding: 4px 8px;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 700;
+            margin-right: 8px;
+            transition: background 0.2s;
+        }
+        input[type=file]::file-selector-button:hover { background: #1d4ed8; }
+
+        .menu-btn {
+            transition: all 0.25s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .menu-btn:hover {
+            transform: translateX(6px);
+            border-color: #38bdf8;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
+        }
+
+        .tool-btn-active {
+            background: #0284c7 !important;
+            border-color: #38bdf8 !important;
+            color: white !important;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+        }
+    </style>
+</head>
+<body class="text-slate-100 overflow-hidden">
+
+    <div id="game-container"></div>
+    <div id="floating-ui-container"></div>
+
+    <div class="ui-layer" id="ui-root">
+        
+        <!-- ГЛАВНОЕ МЕНЮ -->
+        <div id="main-menu" class="interactive absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center z-50">
+            <div class="text-center mb-10">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/20 text-xs tracking-[0.25em] uppercase text-sky-400 font-extrabold mb-3">
+                    <span>⚡ Next-Gen 3D Engine & Sandbox</span>
+                </div>
+                <h1 class="text-6xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-300 to-amber-300 drop-shadow-[0_0_40px_rgba(56,189,248,0.45)]">
+                    SURVIVAL STUDIO
+                </h1>
+                <p class="text-slate-400 text-sm mt-3 max-w-md mx-auto">Полноценный движок: редактор сцен в реальном времени, разрушаемые объекты, аудио-синтезатор и настраиваемый ИИ.</p>
+            </div>
+
+            <div class="flex flex-col space-y-3.5 w-84">
+                <button id="menu-btn-play" class="menu-btn py-4 px-6 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-slate-950 font-black text-xl shadow-xl flex items-center justify-between">
+                    <span class="flex items-center gap-2">⚔️️ Играть</span>
+                    <span class="text-sm opacity-80">▶</span>
+                </button>
+                <button id="menu-btn-editor" class="menu-btn py-3.5 px-6 rounded-2xl glass-panel text-amber-300 font-bold text-lg flex items-center justify-between border border-amber-500/30 hover:border-amber-400">
+                    <span class="flex items-center gap-2">🛠️ Редактор Уровней (Dev)</span>
+                    <span class="text-xs uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">IDE</span>
+                </button>
+                <button id="menu-btn-settings" class="menu-btn py-3 px-6 rounded-2xl glass-panel text-white font-bold text-base flex items-center justify-between border border-slate-700">
+                    <span class="flex items-center gap-2">⚙️ Настройки</span>
+                    <span class="text-sm opacity-50">›</span>
+                </button>
+            </div>
+            <div class="absolute bottom-6 text-xs text-slate-500 font-medium flex items-center gap-4">
+                <span>Three.js + ECS Architecture</span>
+                <span>•</span>
+                <span>Realtime Physics & Raycast Gizmo</span>
+                <span>•</span>
+                <span>JSON Modding</span>
+            </div>
+        </div>
+
+        <!-- ОКНО НАСТРОЕК -->
+        <div id="settings-modal" class="hidden interactive absolute inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50">
+            <div class="glass-panel p-6 rounded-3xl w-96 border border-slate-700 shadow-2xl space-y-6">
+                <div class="flex justify-between items-center border-b border-slate-700 pb-3">
+                    <h2 class="text-xl font-black text-sky-400 flex items-center gap-2">⚙️ Настройки звука и игры</h2>
+                    <button id="btn-close-settings" class="text-slate-400 hover:text-white text-xl font-bold">&times;</button>
+                </div>
+                <div class="space-y-4">
+                    <div class="space-y-1">
+                        <div class="flex justify-between items-center font-bold text-sm">
+                            <span>🔊 Общая громкость SFX:</span>
+                            <span id="label-volume" class="text-sky-400 font-mono">70%</span>
+                        </div>
+                        <input type="range" id="ctrl-volume" min="0" max="100" value="70" class="w-full">
+                    </div>
+                    <div class="space-y-1">
+                        <div class="flex justify-between items-center font-bold text-sm">
+                            <span>🎵 Синтезатор фоновой музыки:</span>
+                            <span id="label-bgm" class="text-indigo-400 font-mono">ВКЛ</span>
+                        </div>
+                        <input type="range" id="ctrl-bgm-volume" min="0" max="100" value="40" class="w-full">
+                    </div>
+                    <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs">
+                        <span>Тени высокого разрешения:</span>
+                        <input type="checkbox" id="ctrl-shadows" checked class="w-4 h-4 rounded">
+                    </div>
+                </div>
+                <div class="pt-2">
+                    <button id="btn-save-settings" class="w-full py-3 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black rounded-xl transition shadow-lg">
+                        Готово
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ИГРОВОЙ ХУД -->
+        <div id="gameplay-hud" class="hidden">
+            <!-- Верхняя панель HUD -->
+            <div class="absolute top-4 left-1/2 transform -translate-x-1/2 flex items-center space-x-4">
+                <div class="glass-panel px-6 py-2 rounded-2xl shadow-2xl flex items-center space-x-6 text-center">
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Волна</div>
+                        <div id="hud-wave" class="text-2xl font-black text-amber-400">1</div>
+                    </div>
+                    <div class="w-px h-8 bg-slate-700/60"></div>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Врагов</div>
+                        <div id="hud-enemies" class="text-2xl font-black text-rose-400">0</div>
+                    </div>
+                    <div class="w-px h-8 bg-slate-700/60"></div>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Уровень</div>
+                        <div id="hud-level" class="text-2xl font-black text-sky-400">1</div>
+                    </div>
+                    <div class="w-px h-8 bg-slate-700/60"></div>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Очки</div>
+                        <div id="hud-score" class="text-xl font-bold text-amber-300">0</div>
+                    </div>
+                    <div class="w-px h-8 bg-slate-700/60"></div>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">FPS</div>
+                        <div id="hud-fps" class="text-xl font-bold text-emerald-400">60</div>
+                    </div>
+                </div>
+
+                <div class="interactive flex items-center space-x-2">
+                    <button id="btn-hud-menu" class="glass-panel hover:bg-slate-800 text-slate-300 font-bold px-3 py-3 rounded-2xl transition shadow-lg" title="Главное меню">
+                        🏠
+                    </button>
+                    <button id="btn-toggle-engine" class="glass-panel hover:bg-slate-800 text-sky-400 border border-sky-500/40 font-bold px-4 py-3 rounded-2xl transition shadow-lg flex items-center space-x-2">
+                        <span>🛠️</span>
+                        <span class="text-sm tracking-wider uppercase font-black">Движок / Dev</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Полоска опыта XP -->
+            <div class="absolute top-0 left-0 w-full h-2.5 bg-slate-900 overflow-hidden shadow-inner">
+                <div id="xp-bar" class="h-full bg-gradient-to-r from-sky-500 via-indigo-400 to-amber-300 transition-all duration-150" style="width: 0%;"></div>
+            </div>
+
+            <!-- Панель навыков и оружия -->
+            <div class="absolute bottom-20 left-1/2 transform -translate-x-1/2 flex items-center space-x-3">
+                <div class="glass-panel px-4 py-2 rounded-xl flex items-center space-x-3 text-xs">
+                    <span class="px-2 py-0.5 rounded bg-slate-800 font-mono font-bold text-amber-300 border border-slate-700">ПРОБЕЛ</span>
+                    <span class="font-semibold text-slate-300">Рывок:</span>
+                    <span id="cd-dash" class="font-bold text-emerald-400">ГОТОВ</span>
+                </div>
+                <div class="glass-panel px-4 py-2 rounded-xl flex items-center space-x-3 text-xs">
+                    <span class="px-2 py-0.5 rounded bg-slate-800 font-mono font-bold text-sky-300 border border-slate-700">E</span>
+                    <span class="font-semibold text-slate-300">Кольцо Мороза:</span>
+                    <span id="cd-nova" class="font-bold text-emerald-400">ГОТОВ</span>
+                </div>
+                <div class="glass-panel px-4 py-2 rounded-xl flex items-center space-x-3 text-xs border border-indigo-500/30">
+                    <span class="px-2 py-0.5 rounded bg-indigo-950 font-mono font-bold text-indigo-300 border border-indigo-800">1-4</span>
+                    <span class="font-semibold text-slate-300">Оружие:</span>
+                    <span id="hud-weapon-name" class="font-black text-indigo-400">Винтовка</span>
+                </div>
+            </div>
+
+            <!-- Здоровье игрока -->
+            <div class="absolute bottom-6 left-1/2 transform -translate-x-1/2 w-[540px] max-w-[90vw]">
+                <div class="glass-panel p-2 rounded-2xl shadow-2xl">
+                    <div class="relative h-6 bg-slate-950 rounded-xl overflow-hidden border border-slate-700">
+                        <div id="hero-hp-fill" class="absolute top-0 left-0 h-full bg-gradient-to-r from-red-600 via-rose-500 to-pink-500 transition-all duration-150" style="width: 100%;"></div>
+                        <div class="absolute inset-0 flex items-center justify-center text-xs tracking-wider uppercase font-black text-white drop-shadow">
+                            <span id="hero-hp-text">100 / 100</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- РЕДАКТОР УРОВНЕЙ И ДВИЖОК (DEV STUDIO) -->
+        <div id="engine-panel" class="hidden interactive absolute top-4 left-4 w-[430px] glass-panel rounded-2xl shadow-2xl p-4 flex flex-col border border-slate-700/80 transition-all duration-300 z-40">
+            <!-- Заголовок панели студии -->
+            <div class="flex justify-between items-center pb-2 border-b border-slate-700/60 mb-3">
+                <div class="flex items-center space-x-2">
+                    <span class="p-1 rounded bg-sky-500/20 text-sky-400 text-sm font-mono font-black">DEV</span>
+                    <span class="font-black text-sm tracking-wider uppercase text-sky-400">Studio & Level Editor</span>
+                </div>
+                <div class="flex items-center space-x-1.5">
+                    <button id="btn-pause-engine" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-lg transition" title="Пауза симуляции">⏸ Пауза</button>
+                    <button id="btn-step-frame" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-lg transition" title="Один шаг кадра">⏭ 1 кадр</button>
+                    <button id="btn-close-engine" class="text-slate-400 hover:text-white text-lg font-bold px-1.5">&times;</button>
+                </div>
+            </div>
+
+            <!-- Вкладки студии -->
+            <div id="tabs-container" class="flex border-b border-slate-800 text-[11px] mb-3 font-semibold text-slate-400 overflow-x-auto whitespace-nowrap cursor-pointer">
+                <button class="tab-btn pb-2 px-2 engine-tab-active" data-tab="tab-builder">🧱 Строитель</button>
+                <button class="tab-btn pb-2 px-2 hover:text-slate-200" data-tab="tab-inspector">🔍 Инспектор</button>
+                <button class="tab-btn pb-2 px-2 hover:text-slate-200" data-tab="tab-hero">🧙 Герой / Оружие</button>
+                <button class="tab-btn pb-2 px-2 hover:text-slate-200" data-tab="tab-waves">🌊 Волны</button>
+                <button class="tab-btn pb-2 px-2 hover:text-slate-200" data-tab="tab-spawner">👾 Спавнер</button>
+                <button class="tab-btn pb-2 px-2 hover:text-slate-200" data-tab="tab-models">📦 Модели</button>
+                <button class="tab-btn pb-2 px-2 hover:text-slate-200" data-tab="tab-world">🌍 Мир</button>
+                <button class="tab-btn pb-2 px-2 hover:text-slate-200" data-tab="tab-presets">💾 Проект</button>
+            </div>
+
+            <!-- Контент вкладок -->
+            <div class="scrollable-panel pr-1 space-y-4 text-xs">
+                
+                <!-- ВКЛАДКА 1: РЕДАКТОР КАРТЫ И РАЗМЕЩЕНИЕ ОБЪЕКТОВ -->
+                <div id="tab-builder" class="tab-content space-y-3">
+                    <div class="p-2.5 bg-sky-950/40 border border-sky-800/40 rounded-xl space-y-1">
+                        <div class="font-bold text-sky-400 flex items-center justify-between">
+                            <span>Инструмент размещения (Raycast)</span>
+                            <span id="editor-mode-badge" class="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono font-bold">Выбор (Select)</span>
+                        </div>
+                        <p class="text-[10px] text-slate-400">Кликните по арене для размещения или выбора объекта. Поддерживается привязка к сетке.</p>
+                    </div>
+
+                    <div class="flex items-center justify-between bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+                        <span class="font-medium text-slate-300">Привязка к сетке (Snap 1.0m):</span>
+                        <input type="checkbox" id="ctrl-grid-snap" checked class="w-4 h-4 rounded">
+                    </div>
+
+                    <div class="font-bold text-slate-300 pt-1">Выберите префаб для размещения:</div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button class="tool-btn py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left font-bold transition flex items-center justify-between tool-btn-active" data-tool="select">
+                            <span>👆 Выделение</span>
+                            <span class="text-[10px] text-slate-500 font-mono">Q</span>
+                        </button>
+                        <button class="tool-btn py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left font-bold transition flex items-center justify-between" data-tool="wall">
+                            <span>🧱 Стена-укрытие</span>
+                            <span class="text-[10px] text-sky-400 font-mono">Solid</span>
+                        </button>
+                        <button class="tool-btn py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left font-bold transition flex items-center justify-between" data-tool="barrel">
+                            <span>🛢️ Бочка с порохом</span>
+                            <span class="text-[10px] text-rose-400 font-mono">AoE Boom</span>
+                        </button>
+                        <button class="tool-btn py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left font-bold transition flex items-center justify-between" data-tool="crate">
+                            <span>📦 Ящик с припасами</span>
+                            <span class="text-[10px] text-amber-400 font-mono">Loot</span>
+                        </button>
+                        <button class="tool-btn py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left font-bold transition flex items-center justify-between" data-tool="shrine">
+                            <span>⛲ Источник здоровья</span>
+                            <span class="text-[10px] text-emerald-400 font-mono">Regen</span>
+                        </button>
+                        <button class="tool-btn py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left font-bold transition flex items-center justify-between" data-tool="pillar">
+                            <span>🏛️ Каменная колонна</span>
+                            <span class="text-[10px] text-slate-400 font-mono">Heavy</span>
+                        </button>
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-800 grid grid-cols-2 gap-2">
+                        <button id="btn-clear-props" class="py-2 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/60 rounded-lg font-bold text-rose-200 transition">
+                            🗑️ Очистить все объекты
+                        </button>
+                        <button id="btn-generate-arena" class="py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-bold text-white transition">
+                            🎲 Случайная арена
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 2: ИНСПЕКТОР СУЩНОСТЕЙ -->
+                <div id="tab-inspector" class="tab-content hidden space-y-3">
+                    <div id="inspector-empty" class="text-center py-8 text-slate-400 space-y-2">
+                        <div class="text-4xl">🔍</div>
+                        <div class="font-bold">Объект не выбран</div>
+                        <p class="text-[11px] text-slate-500">Включите инструмент «Выделение» и кликните на любой объект или героя на арене.</p>
+                    </div>
+
+                    <div id="inspector-content" class="hidden space-y-3">
+                        <div class="p-2.5 bg-slate-900 rounded-xl border border-slate-800 flex justify-between items-center">
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase font-mono">Сущность ID:</span>
+                                <div id="insp-entity-name" class="font-black text-sky-400 text-sm">Стена #1</div>
+                            </div>
+                            <button id="btn-insp-delete" class="px-2 py-1 bg-rose-700 hover:bg-rose-600 rounded text-xs font-bold text-white">Удалить</button>
+                        </div>
+
+                        <div class="space-y-2 bg-slate-900/50 p-2.5 rounded-xl border border-slate-800/80">
+                            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Трансформация (Transform)</span>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div><label class="text-[10px] text-slate-500">X:</label><input type="number" step="0.5" id="insp-pos-x" class="w-full bg-slate-800 p-1 rounded font-mono text-center"></div>
+                                <div><label class="text-[10px] text-slate-500">Y:</label><input type="number" step="0.5" id="insp-pos-y" class="w-full bg-slate-800 p-1 rounded font-mono text-center"></div>
+                                <div><label class="text-[10px] text-slate-500">Z:</label><input type="number" step="0.5" id="insp-pos-z" class="w-full bg-slate-800 p-1 rounded font-mono text-center"></div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 pt-1">
+                                <div><label class="text-[10px] text-slate-500">Scale X:</label><input type="number" step="0.1" id="insp-scale-x" class="w-full bg-slate-800 p-1 rounded font-mono text-center"></div>
+                                <div><label class="text-[10px] text-slate-500">Scale Y:</label><input type="number" step="0.1" id="insp-scale-y" class="w-full bg-slate-800 p-1 rounded font-mono text-center"></div>
+                                <div><label class="text-[10px] text-slate-500">Scale Z:</label><input type="number" step="0.1" id="insp-scale-z" class="w-full bg-slate-800 p-1 rounded font-mono text-center"></div>
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-500">Вращение Y (градусы):</label>
+                                <input type="range" id="insp-rot-y" min="0" max="360" value="0" class="w-full">
+                            </div>
+                        </div>
+
+                        <div id="insp-props-extra" class="space-y-2 bg-slate-900/50 p-2.5 rounded-xl border border-slate-800/80">
+                            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Параметры объекта</span>
+                            <div class="flex justify-between items-center">
+                                <span>Цвет материала:</span>
+                                <input type="color" id="insp-color" value="#38bdf8" class="w-7 h-7">
+                            </div>
+                            <div id="insp-hp-row" class="flex justify-between items-center">
+                                <span>Прочность (HP):</span>
+                                <input type="number" id="insp-hp" class="w-20 bg-slate-800 p-1 rounded font-mono text-center">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Иерархия сцены -->
+                    <div class="pt-2 border-t border-slate-800 space-y-1.5">
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-slate-300">Иерархия объектов (Scene Hierarchy):</span>
+                            <span id="hierarchy-count" class="text-[10px] text-sky-400 font-mono">0 объектов</span>
+                        </div>
+                        <div id="hierarchy-list" class="max-h-36 overflow-y-auto space-y-1 p-1 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px]">
+                            <!-- Генерируется динамически -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 3: ГЕРОЙ И ОРУЖЕЙНЫЙ АРСЕНАЛ -->
+                <div id="tab-hero" class="tab-content hidden space-y-3">
+                    <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded-lg border border-slate-800">
+                        <span class="font-semibold text-rose-300">Режим бога (God Mode)</span>
+                        <input type="checkbox" id="ctrl-godmode" class="w-4 h-4 rounded">
+                    </div>
+
+                    <div class="p-2.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl space-y-2">
+                        <span class="font-bold text-indigo-400">Тип вооружения:</span>
+                        <div class="grid grid-cols-2 gap-1.5">
+                            <button class="weapon-btn py-1.5 px-2 bg-slate-800 hover:bg-slate-700 rounded text-left font-bold transition text-xs border border-slate-700" data-wpn="rifle">🎯 Винтовка</button>
+                            <button class="weapon-btn py-1.5 px-2 bg-slate-800 hover:bg-slate-700 rounded text-left font-bold transition text-xs border border-slate-700" data-wpn="shotgun">💥 Дробовик</button>
+                            <button class="weapon-btn py-1.5 px-2 bg-slate-800 hover:bg-slate-700 rounded text-left font-bold transition text-xs border border-slate-700" data-wpn="plasma">⚡ Плазмаган</button>
+                            <button class="weapon-btn py-1.5 px-2 bg-slate-800 hover:bg-slate-700 rounded text-left font-bold transition text-xs border border-slate-700" data-wpn="grenade">💣 Гранатомёт</button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Урон базовой атаки:</span> <span id="val-hero-dmg" class="text-sky-400 font-bold">25</span></div><input type="range" id="ctrl-hero-dmg" min="1" max="400" value="25" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Скорострельность (сек):</span> <span id="val-hero-cd" class="text-sky-400 font-bold">0.55</span></div><input type="range" id="ctrl-hero-cd" min="0.04" max="1.5" step="0.02" value="0.55" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Снаряды (Multishot):</span> <span id="val-hero-count" class="text-sky-400 font-bold">1</span></div><input type="range" id="ctrl-hero-count" min="1" max="16" step="1" value="1" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Пробивание (Pierce):</span> <span id="val-hero-pierce" class="text-sky-400 font-bold">0</span></div><input type="range" id="ctrl-hero-pierce" min="0" max="12" step="1" value="0" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Скорость бега:</span> <span id="val-hero-spd" class="text-sky-400 font-bold">7.5</span></div><input type="range" id="ctrl-hero-spd" min="3" max="25" step="0.5" value="7.5" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Шанс крита (%):</span> <span id="val-hero-crit" class="text-amber-400 font-bold">15%</span></div><input type="range" id="ctrl-hero-crit" min="0" max="100" step="5" value="15" class="w-full"></div>
+                    <div class="grid grid-cols-2 gap-2 pt-2">
+                        <button id="btn-heal-full" class="bg-emerald-600 hover:bg-emerald-500 py-2 rounded-lg font-bold text-white transition">💖 Исцелить 100%</button>
+                        <button id="btn-force-lvl" class="bg-indigo-600 hover:bg-indigo-500 py-2 rounded-lg font-bold text-white transition">⭐ Level Up (+1)</button>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 4: СИСТЕМА ВОЛН -->
+                <div id="tab-waves" class="tab-content hidden space-y-3">
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Текущая Волна:</span> <span id="val-wave-num" class="text-amber-400 font-bold">1</span></div><input type="range" id="ctrl-wave-num" min="1" max="50" step="1" value="1" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Длительность волны (сек):</span> <span id="val-wave-time" class="text-sky-400 font-bold">30</span></div><input type="range" id="ctrl-wave-time" min="5" max="120" step="5" value="30" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Интервал спавна (сек):</span> <span id="val-spawn-rate" class="text-sky-400 font-bold">1.5</span></div><input type="range" id="ctrl-spawn-rate" min="0.1" max="4.0" step="0.1" value="1.5" class="w-full"></div>
+                    <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded-lg border border-slate-800">
+                        <span>Авто-спавн волн:</span>
+                        <input type="checkbox" id="ctrl-autospawn" checked class="w-4 h-4 rounded">
+                    </div>
+                    <div class="pt-2">
+                        <button id="btn-next-wave" class="w-full bg-amber-600 hover:bg-amber-500 py-2.5 rounded-lg font-bold text-white transition">⏩ Переключить на след. волну</button>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 5: СПАВНЕР СУЩНОСТЕЙ -->
+                <div id="tab-spawner" class="tab-content hidden space-y-3">
+                    <div class="font-bold text-slate-300">Мгновенный спавн сущностей:</div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button class="btn-spawn-type bg-emerald-700 hover:bg-emerald-600 py-1.5 rounded-lg font-bold transition" data-type="swarmer">🧌 Тролль-пехотинец</button>
+                        <button class="btn-spawn-type bg-purple-700 hover:bg-purple-600 py-1.5 rounded-lg font-bold transition" data-type="shooter">🎯 Тролль с рогаткой</button>
+                        <button class="btn-spawn-type bg-rose-700 hover:bg-rose-600 py-1.5 rounded-lg font-bold transition" data-type="brute">🪵 Тролль-берсерк</button>
+                        <button class="btn-spawn-type bg-amber-700 hover:bg-amber-600 py-1.5 rounded-lg font-bold transition" data-type="boss">👑 Гигантский Вождь</button>
+                    </div>
+                    <div class="pt-2 border-t border-slate-800">
+                        <div class="font-bold text-slate-300 mb-2">Множители характеристик врагов:</div>
+                        <div class="space-y-2">
+                            <div class="flex justify-between"><span>Множитель HP:</span> <span id="val-enemy-hp-mult" class="text-rose-400 font-bold">1.0x</span></div>
+                            <input type="range" id="ctrl-enemy-hp-mult" min="0.2" max="6.0" step="0.1" value="1.0" class="w-full">
+                            <div class="flex justify-between"><span>Множитель скорости:</span> <span id="val-enemy-spd-mult" class="text-rose-400 font-bold">1.0x</span></div>
+                            <input type="range" id="ctrl-enemy-spd-mult" min="0.2" max="3.0" step="0.1" value="1.0" class="w-full">
+                        </div>
+                    </div>
+                    <div class="pt-2">
+                        <button id="btn-kill-all" class="w-full bg-rose-600 hover:bg-rose-500 py-2 rounded-lg font-black text-white transition">💀 Уничтожить всех врагов</button>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 6: МОДЕЛИ (.GLB / .GLTF) -->
+                <div id="tab-models" class="tab-content hidden space-y-4">
+                    <div class="bg-sky-950/40 border border-sky-800/50 p-2.5 rounded-xl text-[11px] space-y-1">
+                        <div class="font-bold text-sky-400 flex items-center justify-between">
+                            <span>📦 Asset Manager & Кэш</span>
+                            <span id="cache-total-assets" class="text-[10px] bg-sky-900/60 px-1.5 py-0.5 rounded text-sky-200">Кэш: 0 моделей</span>
+                        </div>
+                        <div class="text-slate-400 text-[10px]">Кэширование геометрий, материалов и скелетных анимаций (.glb).</div>
+                    </div>
+
+                    <div class="p-3 bg-slate-800/40 rounded-xl border border-slate-700/70 space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-sky-400 flex items-center gap-1.5">🧙 Герой (.glb)</span>
+                            <div class="flex items-center gap-2">
+                                <span id="badge-model-hero" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono">Дефолт</span>
+                                <button id="btn-reset-hero-model" class="text-[10px] text-slate-400 hover:text-rose-400 underline transition">Сброс</button>
+                            </div>
+                        </div>
+                        <input type="file" id="upload-hero-model" accept=".glb,.gltf" class="w-full text-xs text-slate-400">
+                    </div>
+
+                    <div class="p-3 bg-slate-800/40 rounded-xl border border-slate-700/70 space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-amber-400 flex items-center gap-1.5">⚡ Снаряд (.glb)</span>
+                            <div class="flex items-center gap-2">
+                                <span id="badge-model-projectile" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono">Дефолт</span>
+                                <button id="btn-reset-proj-model" class="text-[10px] text-slate-400 hover:text-rose-400 underline transition">Сброс</button>
+                            </div>
+                        </div>
+                        <input type="file" id="upload-proj-model" accept=".glb,.gltf" class="w-full text-xs text-slate-400">
+                    </div>
+
+                    <div class="p-3 bg-slate-800/40 rounded-xl border border-slate-700/70 space-y-3">
+                        <div class="font-bold text-rose-400 flex items-center justify-between">
+                            <span class="flex items-center gap-1.5">👾 Модели противников</span>
+                            <button id="btn-reset-all-enemies" class="text-[10px] text-slate-400 hover:text-rose-400 underline transition">Сбросить всех</button>
+                        </div>
+                        
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[11px]">
+                                <span class="text-slate-300 font-medium">Тролль-пехотинец:</span>
+                                <span id="badge-model-swarmer" class="text-[10px] px-1 rounded bg-slate-800 text-slate-400 font-mono">Дефолт</span>
+                            </div>
+                            <input type="file" id="upload-enemy-swarmer" accept=".glb,.gltf" class="w-full text-xs text-slate-400">
+                        </div>
+
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[11px]">
+                                <span class="text-slate-300 font-medium">Тролль с рогаткой (Shooter):</span>
+                                <span id="badge-model-shooter" class="text-[10px] px-1 rounded bg-slate-800 text-slate-400 font-mono">Дефолт</span>
+                            </div>
+                            <input type="file" id="upload-enemy-shooter" accept=".glb,.gltf" class="w-full text-xs text-slate-400">
+                        </div>
+
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[11px]">
+                                <span class="text-slate-300 font-medium">Тролль-берсерк:</span>
+                                <span id="badge-model-brute" class="text-[10px] px-1 rounded bg-slate-800 text-slate-400 font-mono">Дефолт</span>
+                            </div>
+                            <input type="file" id="upload-enemy-brute" accept=".glb,.gltf" class="w-full text-xs text-slate-400">
+                        </div>
+
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[11px]">
+                                <span class="text-amber-300 font-bold">Гигантский Вождь:</span>
+                                <span id="badge-model-boss" class="text-[10px] px-1 rounded bg-slate-800 text-slate-400 font-mono">Дефолт</span>
+                            </div>
+                            <input type="file" id="upload-enemy-boss" accept=".glb,.gltf" class="w-full text-xs text-slate-400">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 7: НАСТРОЙКИ АРЕНЫ И СВЕТА -->
+                <div id="tab-world" class="tab-content hidden space-y-3">
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Размер арены (радиус):</span> <span id="val-arena-size" class="text-sky-400 font-bold">26</span></div><input type="range" id="ctrl-arena-size" min="15" max="60" step="1" value="26" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Высота камеры:</span> <span id="val-cam-height" class="text-sky-400 font-bold">32</span></div><input type="range" id="ctrl-cam-height" min="15" max="65" step="1" value="32" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Отступ камеры (Z):</span> <span id="val-cam-dist" class="text-sky-400 font-bold">22</span></div><input type="range" id="ctrl-cam-dist" min="5" max="50" step="1" value="22" class="w-full"></div>
+                    <div class="space-y-1"><div class="flex justify-between font-medium"><span>Интенсивность солнца:</span> <span id="val-sun-light" class="text-sky-400 font-bold">0.9</span></div><input type="range" id="ctrl-sun-light" min="0" max="2.5" step="0.1" value="0.9" class="w-full"></div>
+                    <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded-lg border border-slate-800">
+                        <span>Цвет сетки:</span><input type="color" id="ctrl-grid-color" value="#38bdf8" class="w-8 h-8">
+                    </div>
+                    <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded-lg border border-slate-800">
+                        <span>Цвет освещения/тумана:</span><input type="color" id="ctrl-fog-color" value="#0f172a" class="w-8 h-8">
+                    </div>
+                </div>
+
+                <!-- ВКЛАДКА 8: ПРЕСЕТЫ И JSON ИМПОРТ/ЭКСПОРТ -->
+                <div id="tab-presets" class="tab-content hidden space-y-3">
+                    <div class="font-bold text-slate-300">Готовые режимы игры:</div>
+                    <div class="space-y-2">
+                        <button id="preset-bullet-hell" class="w-full text-left p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition border border-slate-700">
+                            <div class="font-bold text-sky-400">🔥 Режим «Bullet Hell»</div>
+                            <div class="text-[10px] text-slate-400">8 снарядов, быстрый темп, толпы врагов</div>
+                        </button>
+                        <button id="preset-boss-rush" class="w-full text-left p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition border border-slate-700">
+                            <div class="font-bold text-amber-400">👑 Режим «Boss Rush»</div>
+                            <div class="text-[10px] text-slate-400">Битва с боссами в тесном пространстве</div>
+                        </button>
+                        <button id="preset-hardcore" class="w-full text-left p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition border border-slate-700">
+                            <div class="font-bold text-rose-400">☠️ Режим «Hardcore Arena»</div>
+                            <div class="text-[10px] text-slate-400">50 HP, агрессивный ИИ, смертельные волны</div>
+                        </button>
+                    </div>
+
+                    <div class="pt-3 border-t border-slate-800 space-y-2">
+                        <div class="font-bold text-slate-300">Сохранение и загрузка уровня:</div>
+                        <button id="btn-export-config" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-bold text-white transition flex items-center justify-center gap-2">
+                            <span>💾 Экспорт уровня (JSON)</span>
+                        </button>
+                        <button id="btn-import-config" class="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg font-bold text-slate-300 transition flex items-center justify-center gap-2">
+                            <span>📂 Импорт уровня</span>
+                        </button>
+                        <input type="file" id="file-import" accept=".json" class="hidden">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- МОДАЛЬНОЕ ОКНО LEVEL-UP -->
+        <div id="levelup-modal" class="hidden interactive absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center z-50">
+            <h2 class="text-3xl font-black text-sky-400 mb-2 tracking-wide uppercase drop-shadow">Новый Уровень!</h2>
+            <p class="text-slate-400 text-sm mb-8">Выберите улучшение характеристик</p>
+            <div id="upgrade-cards" class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl w-full px-6"></div>
+        </div>
+
+        <!-- ЭКРАН GAME OVER -->
+        <div id="game-over-screen" class="hidden interactive absolute inset-0 bg-black/90 backdrop-blur-lg flex flex-col items-center justify-center z-50">
+            <h1 class="text-6xl font-black text-rose-600 mb-3 tracking-wider drop-shadow-[0_0_25px_rgba(225,29,72,0.6)]">ВЫ ПОГИБЛИ</h1>
+            <p id="game-over-stats" class="text-slate-300 text-lg mb-8 font-medium"></p>
+            <div class="flex space-x-4">
+                <button id="btn-restart-death" class="bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white font-black py-4 px-10 rounded-2xl text-xl shadow-2xl transition hover:scale-105 active:scale-95">Возродиться</button>
+                <button id="btn-death-menu" class="glass-panel hover:bg-slate-800 text-slate-300 font-bold py-4 px-8 rounded-2xl text-lg transition">В меню</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* ==============================================================
+           1. СИНТЕЗАТОР ЗВУКА И ПРОЦЕДУРНАЯ МУЗЫКА (WEB AUDIO API)
+           ============================================================== */
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.volume = 0.7;
+                this.bgmVolume = 0.4;
+                this.bgmPlaying = false;
+                this.bgmTimer = null;
+                this.bgmStep = 0;
+            }
+            init() {
+                try {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (!this.ctx && AudioCtx) {
+                        this.ctx = new AudioCtx();
+                    }
+                    if (this.ctx && this.ctx.state === 'suspended') {
+                        this.ctx.resume();
+                    }
+                    if (!this.bgmPlaying) this.startProceduralBgm();
+                } catch(e) {}
+            }
+            setVolume(val) { this.volume = Math.max(0, Math.min(1, val)); }
+            setBgmVolume(val) { 
+                this.bgmVolume = Math.max(0, Math.min(1, val)); 
+                if (this.bgmVolume === 0 && this.bgmPlaying) {
+                    this.stopProceduralBgm();
+                } else if (this.bgmVolume > 0 && !this.bgmPlaying && this.ctx) {
+                    this.startProceduralBgm();
+                }
+            }
+            playTone(freqStart, freqEnd, type, duration, baseVol = 0.1) {
+                if (!this.ctx || this.volume <= 0) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    const now = this.ctx.currentTime;
+                    osc.frequency.setValueAtTime(freqStart, now);
+                    if (freqEnd !== freqStart) osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), now + duration);
+                    gain.gain.setValueAtTime(baseVol * this.volume, now);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + duration);
+                } catch(e) {}
+            }
+            shoot(type = 'rifle') {
+                if (type === 'shotgun') {
+                    this.playTone(280, 50, 'sawtooth', 0.18, 0.15);
+                } else if (type === 'plasma') {
+                    this.playTone(880, 220, 'sine', 0.12, 0.12);
+                } else if (type === 'grenade') {
+                    this.playTone(320, 100, 'square', 0.15, 0.14);
+                } else {
+                    this.playTone(600, 120, 'triangle', 0.1, 0.08);
+                }
+            }
+            hit() { this.playTone(180, 50, 'square', 0.08, 0.08); }
+            explosion() {
+                if (!this.ctx || this.volume <= 0) return;
+                try {
+                    const bufferSize = this.ctx.sampleRate * 0.4;
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.25));
+                    }
+                    const noise = this.ctx.createBufferSource();
+                    noise.buffer = buffer;
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(400, this.ctx.currentTime);
+                    filter.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.4);
+                    const gain = this.ctx.createGain();
+                    gain.gain.setValueAtTime(0.35 * this.volume, this.ctx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0.001, this.ctx.currentTime + 0.4);
+                    noise.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    noise.start();
+                } catch(e) {}
+            }
+            gem() { this.playTone(800, 1400, 'sine', 0.08, 0.06); }
+            heal() { this.playTone(400, 800, 'sine', 0.25, 0.1); }
+            dash() { this.playTone(300, 80, 'sawtooth', 0.18, 0.12); }
+            nova() { this.playTone(200, 800, 'sine', 0.3, 0.18); }
+            lvlUp() {
+                if (!this.ctx || this.volume <= 0) return;
+                [440, 554, 659, 880].forEach((freq, idx) => {
+                    setTimeout(() => this.playTone(freq, freq * 1.05, 'triangle', 0.22, 0.12), idx * 70);
+                });
+            }
+            startProceduralBgm() {
+                if (this.bgmPlaying || !this.ctx || this.bgmVolume <= 0) return;
+                this.bgmPlaying = true;
+                const scale = [110, 130.81, 146.83, 164.81, 196.00, 220.00]; // A Minor Pentatonic
+                this.bgmTimer = setInterval(() => {
+                    if (!this.ctx || this.bgmVolume <= 0 || gameState.paused) return;
+                    try {
+                        const note = scale[this.bgmStep % scale.length];
+                        const osc = this.ctx.createOscillator();
+                        const gain = this.ctx.createGain();
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(note * (this.bgmStep % 4 === 0 ? 1 : 2), this.ctx.currentTime);
+                        const dur = 0.22;
+                        gain.gain.setValueAtTime(0.025 * this.bgmVolume, this.ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + dur);
+                        osc.connect(gain);
+                        gain.connect(this.ctx.destination);
+                        osc.start();
+                        osc.stop(this.ctx.currentTime + dur);
+                        this.bgmStep++;
+                    } catch(e) {}
+                }, 240);
+            }
+            stopProceduralBgm() {
+                if (this.bgmTimer) clearInterval(this.bgmTimer);
+                this.bgmPlaying = false;
+            }
+        }
+        const sfx = new SoundFX();
+        window.addEventListener('click', () => sfx.init(), { once: true });
+        window.addEventListener('keydown', () => sfx.init(), { once: true });
+
+        /* ==============================================================
+           2. КОНФИГУРАЦИЯ И ОРУЖЕЙНЫЙ АРСЕНАЛ
+           ============================================================== */
+        const AppMode = { MENU: 'MENU', PLAY: 'PLAY', DEV_EDITOR: 'DEV_EDITOR' };
+        let currentMode = AppMode.MENU;
+
+        const Weapons = {
+            rifle: { name: 'Винтовка', cd: 0.5, count: 1, pierce: 0, spread: 0.05, speed: 32, range: 24, dmgMult: 1.0, isExplosive: false },
+            shotgun: { name: 'Дробовик', cd: 0.75, count: 5, pierce: 1, spread: 0.32, speed: 28, range: 16, dmgMult: 0.55, isExplosive: false },
+            plasma: { name: 'Плазмаган', cd: 0.2, count: 1, pierce: 2, spread: 0.08, speed: 38, range: 26, dmgMult: 0.75, isExplosive: false },
+            grenade: { name: 'Гранатомёт', cd: 1.1, count: 1, pierce: 0, spread: 0.02, speed: 20, range: 22, dmgMult: 2.2, isExplosive: true, aoeRadius: 4.5 }
+        };
+        let currentWeaponKey = 'rifle';
+
+        const engineConfig = { 
+            godMode: false, 
+            autoSpawn: true, 
+            spawnInterval: 1.5, 
+            enemyHpMult: 1.0, 
+            enemySpdMult: 1.0, 
+            arenaSize: 26, 
+            cameraOffset: { x: 0, y: 32, z: 22 },
+            gridSnap: true
+        };
+
+        const gameState = { 
+            paused: true, 
+            gameOver: false, 
+            wave: 1, 
+            score: 0, 
+            xp: 0, 
+            xpNeeded: 25, 
+            level: 1, 
+            waveTime: 30, 
+            waveTimer: 30, 
+            enemiesKilled: 0 
+        };
+
+        const hero = { 
+            x: 0, z: 0, radius: 0.55, 
+            maxHp: 100, hp: 100, speed: 7.5, 
+            damage: 25, critChance: 0.15, critMult: 2.0, 
+            attackCd: 0.5, projectileCount: 1, piercing: 0, 
+            projSpeed: 30, range: 22, 
+            dashCd: 3.5, lastDash: -99, dashDuration: 0.18, isDashing: false, dashDir: { x: 0, z: 0 }, 
+            novaCd: 8.0, lastNova: -99, 
+            iFrames: 0, mesh: null, lastAttack: 0, recoil: 0 
+        };
+        
+        const enemyTypes = {
+            swarmer: { hp: 30, dmg: 8, spd: 4.8, r: 0.35, color: 0x22c55e, height: 0.8, xp: 5, score: 20 },
+            brute:   { hp: 110, dmg: 22, spd: 2.4, r: 0.7, color: 0xe11d48, height: 1.8, xp: 18, score: 60 },
+            shooter: { hp: 45, dmg: 14, spd: 3.2, r: 0.45, color: 0x8b5cf6, height: 1.2, xp: 12, score: 40, isShooter: true, shootCd: 2.5 },
+            boss:    { hp: 600, dmg: 35, spd: 2.1, r: 1.2, color: 0xf59e0b, height: 2.8, xp: 100, score: 400, isBoss: true }
+        };
+
+        /* ==============================================================
+           3. ASSET MANAGER (КЭШ, GLTF, АНИМАЦИИ)
+           ============================================================== */
+        class AssetManager {
+            constructor() {
+                this.cache = new Map();
+                this.loader = new THREE.GLTFLoader();
+                this.subscribers = new Map();
+            }
+
+            analyzeModel(object3d) {
+                let vertices = 0, triangles = 0, meshes = 0;
+                object3d.traverse(child => {
+                    if (child.isMesh && child.geometry) {
+                        meshes++;
+                        const geo = child.geometry;
+                        if (geo.attributes && geo.attributes.position) vertices += geo.attributes.position.count;
+                        if (geo.index) triangles += geo.index.count / 3;
+                        else if (geo.attributes && geo.attributes.position) triangles += geo.attributes.position.count / 3;
+                    }
+                });
+                return { vertices, triangles: Math.round(triangles), meshes };
+            }
+
+            normalize(gltfScene, targetHeight) {
+                const box = new THREE.Box3().setFromObject(gltfScene);
+                const size = new THREE.Vector3();
+                const center = new THREE.Vector3();
+                box.getSize(size);
+                box.getCenter(center);
+                const scale = targetHeight / (size.y || 1);
+                const wrapper = new THREE.Group();
+                gltfScene.scale.setScalar(scale);
+                gltfScene.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+                gltfScene.traverse(c => {
+                    if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }
+                });
+                wrapper.add(gltfScene);
+                return wrapper;
+            }
+
+            async loadModel(key, fileOrUrl, targetHeight, fileName = 'custom.glb') {
+                return new Promise((resolve, reject) => {
+                    let url = '';
+                    let isObjectUrl = false;
+                    if (typeof fileOrUrl === 'string') url = fileOrUrl;
+                    else if (fileOrUrl instanceof File || fileOrUrl instanceof Blob) {
+                        url = URL.createObjectURL(fileOrUrl);
+                        isObjectUrl = true;
+                    } else return reject(new Error('Недопустимый формат файла'));
+
+                    this.loader.load(
+                        url,
+                        gltf => {
+                            if (isObjectUrl) URL.revokeObjectURL(url);
+                            if (this.has(key)) this.unload(key);
+                            const stats = this.analyzeModel(gltf.scene);
+                            const normalized = this.normalize(gltf.scene, targetHeight);
+                            const animations = gltf.animations || [];
+                            this.cache.set(key, {
+                                template: normalized,
+                                animations: animations,
+                                stats: stats,
+                                name: fileName,
+                                targetHeight: targetHeight,
+                                timestamp: Date.now()
+                            });
+                            this.notify(key, 'loaded', this.cache.get(key));
+                            resolve(this.cache.get(key));
+                        },
+                        undefined,
+                        err => {
+                            if (isObjectUrl) URL.revokeObjectURL(url);
+                            console.error(`Ошибка загрузки модели ${key}:`, err);
+                            reject(err);
+                        }
+                    );
+                });
+            }
+
+            instantiate(key) {
+                const asset = this.cache.get(key);
+                if (!asset || !asset.template) return null;
+                let instance;
+                if (typeof THREE.SkeletonUtils !== 'undefined' && THREE.SkeletonUtils.clone) {
+                    instance = THREE.SkeletonUtils.clone(asset.template);
+                } else {
+                    instance = asset.template.clone(true);
+                }
+                if (asset.animations && asset.animations.length > 0) {
+                    const mixer = new THREE.AnimationMixer(instance);
+                    const clip = asset.animations[0];
+                    const action = mixer.clipAction(clip);
+                    action.play();
+                    instance.userData.mixer = mixer;
+                    instance.userData.hasCustomAnim = true;
+                } else {
+                    instance.userData.hasCustomAnim = false;
+                }
+                return instance;
+            }
+
+            has(key) { return this.cache.has(key); }
+            getStats(key) { const asset = this.cache.get(key); return asset ? asset.stats : null; }
+            unload(key) {
+                const asset = this.cache.get(key);
+                if (!asset) return;
+                disposeObject(asset.template, true);
+                this.cache.delete(key);
+                this.notify(key, 'unloaded', null);
+            }
+            on(key, callback) {
+                if (!this.subscribers.has(key)) this.subscribers.set(key, []);
+                this.subscribers.get(key).push(callback);
+            }
+            notify(key, event, data) {
+                const list = this.subscribers.get(key) || [];
+                list.forEach(cb => cb(event, data));
+            }
+        }
+        const assetManager = new AssetManager();
+
+        /* ==============================================================
+           4. THREE.JS СЦЕНА, ОСВЕЩЕНИЕ И АРЕНА
+           ============================================================== */
+        function disposeObject(obj, deep = false) {
+            if (!obj) return;
+            obj.traverse(child => {
+                if (child.isMesh) {
+                    if (deep) {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                            else child.material.dispose();
+                        }
+                    } else {
+                        if (child._needsMatDispose && child.material) {
+                            child.material.dispose();
+                        }
+                    }
+                }
+            });
+            if (obj.parent) obj.parent.remove(obj);
+        }
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0f1d);
+        scene.fog = new THREE.FogExp2(0x0a0f1d, 0.015);
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('game-container').appendChild(renderer.domElement);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        const ambientLight = new THREE.AmbientLight(0x64748b, 0.65);
+        scene.add(ambientLight);
+
+        const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+        sun.position.set(25, 45, 20);
+        sun.castShadow = true;
+        sun.shadow.mapSize.width = 1024;
+        sun.shadow.mapSize.height = 1024;
+        sun.shadow.camera.near = 10;
+        sun.shadow.camera.far = 100;
+        const d = 35;
+        sun.shadow.camera.left = -d;
+        sun.shadow.camera.right = d;
+        sun.shadow.camera.top = d;
+        sun.shadow.camera.bottom = -d;
+        scene.add(sun);
+
+        // Геометрии и материалы
+        const defaultProjGeo = new THREE.SphereGeometry(0.28, 8, 8);
+        const defaultProjMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xeab308, roughness: 0.1 });
+        const plasmaProjMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, roughness: 0.1 });
+        const grenadeProjGeo = new THREE.DodecahedronGeometry(0.35, 1);
+        const grenadeProjMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e, emissive: 0x9f1239, roughness: 0.4 });
+        const enemyProjGeo = new THREE.DodecahedronGeometry(0.32, 0);
+        const enemyProjMat = new THREE.MeshStandardMaterial({ color: 0x78716c, roughness: 0.9, metalness: 0.1 });
+        const particleGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
+        const particleMats = {}; 
+        const gemGeo = new THREE.OctahedronGeometry(0.25);
+        const gemMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, roughness: 0.2 });
+        const gemBossMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, roughness: 0.2 });
+
+        let floorMesh, gridHelper, walls = [];
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4 });
+
+        // Индикатор курсора сетки (Placement Indicator)
+        const placementCursor = new THREE.Mesh(
+            new THREE.BoxGeometry(1.6, 0.05, 1.6),
+            new THREE.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true, transparent: true, opacity: 0.8 })
+        );
+        placementCursor.visible = false;
+        scene.add(placementCursor);
+
+        // Индикатор выбора объекта (Gizmo Highlight)
+        const selectionBox = new THREE.BoxHelper(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)), 0xf59e0b);
+        selectionBox.visible = false;
+        scene.add(selectionBox);
+
+        function rebuildArena(size) {
+            engineConfig.arenaSize = size;
+            if (floorMesh) disposeObject(floorMesh, true);
+            if (gridHelper) disposeObject(gridHelper, true);
+            walls.forEach(w => disposeObject(w, true));
+            walls = [];
+
+            const floorGeo = new THREE.PlaneGeometry(size * 2, size * 2);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x141e33, roughness: 0.7, metalness: 0.15 });
+            floorMesh = new THREE.Mesh(floorGeo, floorMat);
+            floorMesh.rotation.x = -Math.PI / 2;
+            floorMesh.receiveShadow = true;
+            scene.add(floorMesh);
+
+            const gridColor = document.getElementById('ctrl-grid-color') ? document.getElementById('ctrl-grid-color').value : '#38bdf8';
+            gridHelper = new THREE.GridHelper(size * 2, Math.round(size * 2), new THREE.Color(gridColor), 0x1e293b);
+            gridHelper.position.y = 0.02;
+            scene.add(gridHelper);
+
+            const buildWall = (w, h, d, x, z) => {
+                const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+                m.position.set(x, h / 2, z);
+                m.castShadow = true;
+                m.receiveShadow = true;
+                scene.add(m);
+                walls.push(m);
+            };
+            buildWall(size * 2, 3, 1, 0, -size);
+            buildWall(size * 2, 3, 1, 0, size);
+            buildWall(1, 3, size * 2, -size, 0);
+            buildWall(1, 3, size * 2, size, 0);
+        }
+        rebuildArena(engineConfig.arenaSize);
+
+        /* ==============================================================
+           5. ПРОЦЕДУРНЫЕ МОДЕЛИ (ИГРОК, ВРАГИ, ПРОПСЫ)
+           ============================================================== */
+        const humanMaterials = {
+            skin: new THREE.MeshStandardMaterial({ color: 0xe0ac69, roughness: 0.6 }),
+            jacket: new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8 }),
+            vest: new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7, metalness: 0.1 }),
+            pants: new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.85 }),
+            boots: new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 }),
+            cap: new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.8 }),
+            woodStock: new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.7 }),
+            gunMetal: new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.85, roughness: 0.25 }),
+            gunDetails: new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.7, roughness: 0.3 })
+        };
+
+        function createHeroMeshDefault() {
+            const root = new THREE.Group();
+            const s = 1.0;
+            const legGeo = new THREE.CylinderGeometry(0.12 * s, 0.1 * s, 0.65 * s, 8);
+            const leftLeg = new THREE.Mesh(legGeo, humanMaterials.pants);
+            leftLeg.position.set(-0.2 * s, 0.42 * s, 0);
+            leftLeg.castShadow = true;
+            root.add(leftLeg);
+
+            const rightLeg = leftLeg.clone();
+            rightLeg.position.x = 0.2 * s;
+            root.add(rightLeg);
+
+            const bootGeo = new THREE.BoxGeometry(0.18 * s, 0.14 * s, 0.32 * s);
+            const leftBoot = new THREE.Mesh(bootGeo, humanMaterials.boots);
+            leftBoot.position.set(-0.2 * s, 0.08 * s, 0.05 * s);
+            leftBoot.castShadow = true;
+            root.add(leftBoot);
+
+            const rightBoot = leftBoot.clone();
+            rightBoot.position.x = 0.2 * s;
+            root.add(rightBoot);
+
+            const torsoGeo = new THREE.BoxGeometry(0.55 * s, 0.65 * s, 0.32 * s);
+            const torso = new THREE.Mesh(torsoGeo, humanMaterials.jacket);
+            torso.position.set(0, 1.05 * s, 0);
+            torso.castShadow = true;
+            root.add(torso);
+
+            const vest = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.5 * s, 0.36 * s), humanMaterials.vest);
+            vest.position.set(0, 1.02 * s, 0);
+            vest.castShadow = true;
+            root.add(vest);
+
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.2 * s, 10, 10), humanMaterials.skin);
+            head.position.set(0, 1.58 * s, 0.02 * s);
+            head.castShadow = true;
+            root.add(head);
+
+            const capTop = new THREE.Mesh(new THREE.SphereGeometry(0.21 * s, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), humanMaterials.cap);
+            capTop.position.set(0, 1.62 * s, 0.02 * s);
+            root.add(capTop);
+
+            const rifle = new THREE.Group();
+            const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08 * s, 0.14 * s, 0.45 * s), humanMaterials.woodStock);
+            stock.position.set(0, 0, -0.22 * s);
+            rifle.add(stock);
+
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032 * s, 0.032 * s, 0.85 * s, 8), humanMaterials.gunMetal);
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.set(0, 0.06 * s, 0.68 * s);
+            barrel.castShadow = true;
+            rifle.add(barrel);
+
+            rifle.position.set(0.18 * s, 1.05 * s, 0.28 * s);
+            root.add(rifle);
+
+            return root;
+        }
+
+        hero.mesh = createHeroMeshDefault();
+        scene.add(hero.mesh);
+
+        // Материалы троллей и мобов
+        const trollMaterials = {
+            skinSmall: new THREE.MeshStandardMaterial({ color: 0x557a46, roughness: 0.8, metalness: 0.1 }),
+            skinBrute: new THREE.MeshStandardMaterial({ color: 0x3d5a40, roughness: 0.85, metalness: 0.1 }),
+            skinShooter: new THREE.MeshStandardMaterial({ color: 0x476b50, roughness: 0.8, metalness: 0.1 }),
+            skinBoss: new THREE.MeshStandardMaterial({ color: 0x2d3e34, roughness: 0.9, metalness: 0.15 }),
+            stone: new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 }),
+            wood: new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.85 }),
+            darkWood: new THREE.MeshStandardMaterial({ color: 0x3b2314, roughness: 0.9 }),
+            metal: new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.4, metalness: 0.7 }),
+            leather: new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 }),
+            tusk: new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.5 }),
+            eyeGlowYellow: new THREE.MeshBasicMaterial({ color: 0xfacc15 }),
+            eyeGlowRed: new THREE.MeshBasicMaterial({ color: 0xff1744 }),
+            eyeGlowOrange: new THREE.MeshBasicMaterial({ color: 0xf97316 })
+        };
+
+        function createTrollWithClub(scale = 1.0, isBrute = false) {
+            const root = new THREE.Group();
+            const skinMat = isBrute ? trollMaterials.skinBrute : trollMaterials.skinSmall;
+            const s = scale;
+            const legGeo = new THREE.CylinderGeometry(0.18 * s, 0.22 * s, 0.6 * s, 8);
+            const leftLeg = new THREE.Mesh(legGeo, skinMat);
+            leftLeg.position.set(-0.25 * s, 0.3 * s, 0);
+            leftLeg.castShadow = true;
+            root.add(leftLeg);
+
+            const rightLeg = leftLeg.clone();
+            rightLeg.position.x = 0.25 * s;
+            root.add(rightLeg);
+
+            const torsoGeo = new THREE.DodecahedronGeometry(0.55 * s, 1);
+            torsoGeo.scale(1, 1.25, 0.9);
+            const torso = new THREE.Mesh(torsoGeo, skinMat);
+            torso.position.set(0, 0.9 * s, 0);
+            torso.castShadow = true;
+            root.add(torso);
+
+            const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.38 * s, 1), skinMat);
+            head.position.set(0, 1.28 * s, 0.22 * s);
+            head.castShadow = true;
+            root.add(head);
+
+            const eyeGeo = new THREE.SphereGeometry(0.065 * s, 6, 6);
+            const leftEye = new THREE.Mesh(eyeGeo, isBrute ? trollMaterials.eyeGlowRed : trollMaterials.eyeGlowYellow);
+            leftEye.position.set(-0.13 * s, 1.35 * s, 0.52 * s);
+            root.add(leftEye);
+
+            const rightEye = leftEye.clone();
+            rightEye.position.x = 0.13 * s;
+            root.add(rightEye);
+
+            const clubGroup = new THREE.Group();
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.06 * s, 0.07 * s, 1.1 * s, 8), trollMaterials.darkWood);
+            handle.position.y = 0.35 * s;
+            clubGroup.add(handle);
+            const headClub = new THREE.Mesh(new THREE.CylinderGeometry(0.18 * s, 0.1 * s, 0.7 * s, 8), trollMaterials.wood);
+            headClub.position.y = 0.8 * s;
+            headClub.castShadow = true;
+            clubGroup.add(headClub);
+            clubGroup.position.set(0.65 * s, 0.65 * s, 0.25 * s);
+            clubGroup.rotation.x = Math.PI / 3;
+            root.add(clubGroup);
+
+            return root;
+        }
+
+        function createTrollWithSlingshot(scale = 1.0) {
+            const root = new THREE.Group();
+            const skinMat = trollMaterials.skinShooter;
+            const s = scale;
+            const legGeo = new THREE.CylinderGeometry(0.13 * s, 0.16 * s, 0.6 * s, 7);
+            const leftLeg = new THREE.Mesh(legGeo, skinMat);
+            leftLeg.position.set(-0.2 * s, 0.3 * s, -0.05 * s);
+            root.add(leftLeg);
+            const rightLeg = leftLeg.clone();
+            rightLeg.position.set(0.2 * s, 0.3 * s, 0.1 * s);
+            root.add(rightLeg);
+
+            const torso = new THREE.Mesh(new THREE.DodecahedronGeometry(0.42 * s, 1), skinMat);
+            torso.position.set(0, 0.85 * s, 0);
+            torso.castShadow = true;
+            root.add(torso);
+
+            const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.34 * s, 1), skinMat);
+            head.position.set(0, 1.25 * s, 0.15 * s);
+            head.castShadow = true;
+            root.add(head);
+
+            return root;
+        }
+
+        function createGiantBossTroll(scale = 1.0) {
+            const root = new THREE.Group();
+            const skinMat = trollMaterials.skinBoss;
+            const s = scale;
+            const torsoGeo = new THREE.DodecahedronGeometry(1.05 * s, 1);
+            torsoGeo.scale(1.2, 1.3, 1.0);
+            const torso = new THREE.Mesh(torsoGeo, skinMat);
+            torso.position.set(0, 1.55 * s, 0);
+            torso.castShadow = true;
+            root.add(torso);
+
+            const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.68 * s, 1), skinMat);
+            head.position.set(0, 2.15 * s, 0.45 * s);
+            head.castShadow = true;
+            root.add(head);
+
+            const hornGeo = new THREE.ConeGeometry(0.18 * s, 0.9 * s, 6);
+            const leftHorn = new THREE.Mesh(hornGeo, trollMaterials.stone);
+            leftHorn.position.set(-0.6 * s, 2.55 * s, 0.25 * s);
+            leftHorn.rotation.z = Math.PI / 3;
+            leftHorn.castShadow = true;
+            root.add(leftHorn);
+
+            const rightHorn = leftHorn.clone();
+            rightHorn.position.x = 0.6 * s;
+            rightHorn.rotation.z = -Math.PI / 3;
+            root.add(rightHorn);
+
+            return root;
+        }
+
+        const defaultEnemyTemplates = {};
+        function getEnemyTemplate(typeKey) {
+            if (assetManager.has(typeKey)) return assetManager.instantiate(typeKey);
+            if (!defaultEnemyTemplates[typeKey]) {
+                let model;
+                if (typeKey === 'swarmer') model = createTrollWithClub(0.75, false);
+                else if (typeKey === 'brute') model = createTrollWithClub(1.35, true);
+                else if (typeKey === 'shooter') model = createTrollWithSlingshot(0.95);
+                else if (typeKey === 'boss') model = createGiantBossTroll(1.75);
+                else model = createTrollWithClub(1.0, false);
+                defaultEnemyTemplates[typeKey] = model;
+            }
+            return defaultEnemyTemplates[typeKey].clone(true);
+        }
+
+        /* ==============================================================
+           6. ECS (ENTITY-COMPONENT-SYSTEM) И ФАБРИКИ
+           ============================================================== */
+        class Entity {
+            constructor(id) { this.id = id; this.c = {}; this.dead = false; }
+            add(name, data) { this.c[name] = data; return this; }
+            has(name) { return this.c[name] !== undefined; }
+        }
+
+        class ECS {
+            constructor() { this.entities = []; this.systems = []; this.nextId = 1; }
+            create() { const e = new Entity(this.nextId++); this.entities.push(e); return e; }
+            addSystem(sys) { this.systems.push(sys); }
+            query(...comps) { return this.entities.filter(e => !e.dead && comps.every(c => e.has(c))); }
+            update(dt, time) {
+                this.systems.forEach(s => s(this, dt, time));
+                this.entities = this.entities.filter(e => {
+                    if (e.dead) {
+                        if (e.has('mesh') && e.c.mesh.obj) disposeObject(e.c.mesh.obj);
+                        if (e.has('ui') && e.c.ui.bar) e.c.ui.bar.remove();
+                        if (e.has('floatingText') && e.c.floatingText.el) e.c.floatingText.el.remove();
+                    }
+                    return !e.dead;
+                });
+            }
+            clear() {
+                this.entities.forEach(e => e.dead = true);
+                this.update(0, 0);
+            }
+        }
+        
+        const ecs = new ECS();
+        let nextEntityId = 1;
+
+        // Вспомогательные эффекты частиц и драгоценных камней
+        function spawnImpactParticles(x, y, z, colorHex, count = 8) {
+            if (!particleMats[colorHex]) particleMats[colorHex] = new THREE.MeshBasicMaterial({ color: colorHex });
+            for (let i = 0; i < count; i++) {
+                const m = new THREE.Mesh(particleGeo, particleMats[colorHex]);
+                m.position.set(x, y, z);
+                scene.add(m);
+                const angle = Math.random() * Math.PI * 2, spd = 2 + Math.random() * 5;
+                ecs.create()
+                   .add('transform', {x, y, z})
+                   .add('velocity', {vx: Math.cos(angle) * spd, vy: 2 + Math.random() * 4, vz: Math.sin(angle) * spd})
+                   .add('lifetime', {time: 0.4})
+                   .add('particle', {})
+                   .add('mesh', {obj: m});
+            }
+        }
+
+        function spawnXpGem(x, z, val) {
+            const isBoss = val > 25;
+            const m = new THREE.Mesh(gemGeo, isBoss ? gemBossMat : gemMat);
+            if (isBoss) m.scale.setScalar(1.5);
+            m.position.set(x, 0.35, z);
+            scene.add(m);
+            ecs.create().add('transform', {x, y: 0.35, z}).add('gem', {val}).add('mesh', {obj: m});
+        }
+
+        // ==============================================================
+        // ФАБРИКА СТАТИЧЕСКИХ И РАЗРУШАЕМЫХ ОБЪЕКТОВ АРЕНЫ
+        // ==============================================================
+        const PropMaterials = {
+            wall: new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 }),
+            pillar: new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.8 }),
+            barrel: new THREE.MeshStandardMaterial({ color: 0xe11d48, roughness: 0.4, metalness: 0.2 }),
+            crate: new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.8 }),
+            shrine: new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.3, emissive: 0x065f46 })
+        };
+
+        function spawnProp(type, x, z, customScale = {x: 1, y: 1, z: 1}, customColor = null, customHp = null) {
+            let mesh, colliderRadius = 1.0, isDestructible = false, hp = 100, isExplosive = false, isHealShrine = false;
+            
+            if (type === 'wall') {
+                mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2.5, 2), PropMaterials.wall.clone());
+                mesh.position.set(x, 1.25, z);
+                colliderRadius = 1.2;
+            } else if (type === 'pillar') {
+                mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.9, 3.5, 12), PropMaterials.pillar.clone());
+                mesh.position.set(x, 1.75, z);
+                colliderRadius = 0.9;
+            } else if (type === 'barrel') {
+                mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.4, 10), PropMaterials.barrel.clone());
+                mesh.position.set(x, 0.7, z);
+                colliderRadius = 0.7;
+                isDestructible = true;
+                hp = customHp !== null ? customHp : 40;
+                isExplosive = true;
+            } else if (type === 'crate') {
+                mesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), PropMaterials.crate.clone());
+                mesh.position.set(x, 0.6, z);
+                colliderRadius = 0.75;
+                isDestructible = true;
+                hp = customHp !== null ? customHp : 30;
+            } else if (type === 'shrine') {
+                mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.9, 1), PropMaterials.shrine.clone());
+                mesh.position.set(x, 1.1, z);
+                colliderRadius = 1.0;
+                isHealShrine = true;
+            } else {
+                mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), PropMaterials.wall.clone());
+                mesh.position.set(x, 0.5, z);
+            }
+
+            if (customColor && mesh.material) mesh.material.color.set(customColor);
+            mesh.scale.set(customScale.x || 1, customScale.y || 1, customScale.z || 1);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            const entity = ecs.create()
+               .add('transform', { x, y: mesh.position.y, z, rotX: 0, rotY: 0, rotZ: 0, scale: { ...customScale } })
+               .add('obstacle', { radius: colliderRadius * Math.max(customScale.x, customScale.z), type, isDestructible, hp, maxHp: hp, isExplosive, isHealShrine, lastHeal: 0 })
+               .add('mesh', { obj: mesh });
+
+            mesh.userData.entityId = entity.id;
+            updateHierarchyUI();
+            return entity;
+        }
+
+        // Взрыв бочки (AoE цепная реакция)
+        function explodeBarrel(x, z, radius = 5.0, dmg = 85) {
+            sfx.explosion();
+            spawnImpactParticles(x, 0.8, z, 0xf97316, 35);
+            spawnImpactParticles(x, 1.2, z, 0xef4444, 25);
+
+            // Урон всем врагам в радиусе взрыва
+            ecs.query('enemy', 'transform', 'ui').forEach(e => {
+                const tr = e.c.transform, en = e.c.enemy;
+                const d = Math.hypot(tr.x - x, tr.z - z);
+                if (d <= radius) {
+                    const falloff = 1 - (d / radius) * 0.5;
+                    const finalDmg = Math.round(dmg * falloff);
+                    en.hp -= finalDmg;
+                    spawnDamageText(finalDmg, tr.x, tr.z, false, true);
+                    e.c.ui.fill.style.width = `${Math.max(0, (en.hp / en.maxHp) * 100)}%`;
+                    if (en.hp <= 0) {
+                        e.dead = true;
+                        spawnXpGem(tr.x, tr.z, en.xpVal * 1.5);
+                        gameState.score += en.scoreVal;
+                        gameState.enemiesKilled++;
+                    }
+                }
+            });
+
+            // Урон другим взрывающимся бочкам (цепная детонация)
+            ecs.query('obstacle', 'transform').forEach(o => {
+                const obs = o.c.obstacle, tr = o.c.transform;
+                if (obs.isDestructible && obs.hp > 0) {
+                    const d = Math.hypot(tr.x - x, tr.z - z);
+                    if (d <= radius && d > 0.1) {
+                        obs.hp -= dmg;
+                        if (obs.hp <= 0 && !o.dead) {
+                            o.dead = true;
+                            setTimeout(() => explodeBarrel(tr.x, tr.z), 60);
+                        }
+                    }
+                }
+            });
+
+            // Урон игроку, если он слишком близко
+            const dHero = Math.hypot(hero.x - x, hero.z - z);
+            if (dHero <= radius && hero.iFrames <= 0 && !engineConfig.godMode) {
+                const hDmg = Math.round(dmg * 0.35);
+                hero.hp -= hDmg;
+                hero.iFrames = 0.4;
+                sfx.hit();
+                updateHeroHpUI();
+                spawnDamageText(hDmg, hero.x, hero.z, true, false);
+            }
+        }
+
+        // Спавн врагов
+        const uiContainer = document.getElementById('floating-ui-container');
+        function spawnEnemy(typeKey, customX = null, customZ = null) {
+            const t = enemyTypes[typeKey];
+            let ex = customX, ez = customZ;
+            const dist = engineConfig.arenaSize - 1.5;
+
+            if (ex === null || ez === null) {
+                const side = Math.floor(Math.random() * 4);
+                if (side === 0) { ex = (Math.random() * 2 - 1) * dist; ez = -dist; }
+                else if (side === 1) { ex = (Math.random() * 2 - 1) * dist; ez = dist; }
+                else if (side === 2) { ex = -dist; ez = (Math.random() * 2 - 1) * dist; }
+                else { ex = dist; ez = (Math.random() * 2 - 1) * dist; }
+            }
+
+            const mesh = getEnemyTemplate(typeKey);
+            scene.add(mesh);
+
+            const hpEl = document.createElement('div');
+            hpEl.className = 'enemy-hp-bar' + (t.isBoss ? ' enemy-boss-bar' : '');
+            const hpFill = document.createElement('div');
+            hpFill.className = 'enemy-hp-fill' + (t.isBoss ? ' enemy-boss-fill' : '');
+            hpEl.appendChild(hpFill);
+            uiContainer.appendChild(hpEl);
+
+            const hpScaled = t.hp * (1 + (gameState.wave - 1) * 0.25) * engineConfig.enemyHpMult;
+            
+            const e = ecs.create()
+               .add('transform', {x: ex, y: 0, z: ez, rotY: 0, rotZ: 0})
+               .add('enemy', {id: nextEntityId++, type: typeKey, hp: hpScaled, maxHp: hpScaled, dmg: t.dmg * (1 + (gameState.wave - 1) * 0.15), spd: t.spd * engineConfig.enemySpdMult, r: t.r, height: t.height, isShooter: !!t.isShooter, isBoss: !!t.isBoss, lastShot: 0, frozenTimer: 0, xpVal: t.xp, scoreVal: t.score})
+               .add('mesh', {obj: mesh})
+               .add('ui', {bar: hpEl, fill: hpFill});
+               
+            mesh.userData.entityId = e.id;
+            document.getElementById('hud-enemies').innerText = ecs.query('enemy').length;
+        }
+
+        let lastSpawnTime = 0, bossSpawnedThisWave = false;
+        function updateWaveSystem(dt, time) {
+            if (gameState.waveTimer > 0) gameState.waveTimer -= dt;
+            else {
+                gameState.wave++; 
+                gameState.waveTimer = gameState.waveTime; 
+                bossSpawnedThisWave = false;
+                syncEngineInputs(); 
+                hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.3);
+                updateHeroHpUI(); 
+                spawnDamageText("ВОЛНА " + gameState.wave, hero.x, hero.z, false, true);
+            }
+            if (!engineConfig.autoSpawn) return;
+            if (gameState.wave % 3 === 0 && !bossSpawnedThisWave && gameState.waveTimer <= gameState.waveTime * 0.7) { 
+                spawnEnemy('boss'); 
+                bossSpawnedThisWave = true; 
+            }
+            if (time - lastSpawnTime > engineConfig.spawnInterval) {
+                lastSpawnTime = time;
+                let pick = 'swarmer';
+                const roll = Math.random();
+                if (gameState.wave >= 2 && roll < 0.35) pick = 'shooter';
+                else if (gameState.wave >= 3 && roll > 0.7) pick = 'brute';
+                spawnEnemy(pick);
+            }
+        }
+
+        /* ==============================================================
+           7. УПРАВЛЕНИЕ, БОЙ И СТРЕЛЬБА
+           ============================================================== */
+        const keys = {};
+        window.addEventListener('keydown', e => {
+            if (e.target.tagName === 'INPUT') return;
+            keys[e.code] = true;
+            if (currentMode === AppMode.MENU) return;
+            if (e.code === 'Space') tryDash();
+            if (e.code === 'KeyE') tryNova();
+            if (e.code === 'Digit1') setWeapon('rifle');
+            if (e.code === 'Digit2') setWeapon('shotgun');
+            if (e.code === 'Digit3') setWeapon('plasma');
+            if (e.code === 'Digit4') setWeapon('grenade');
+        });
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        window.addEventListener('blur', () => {
+            for (let key in keys) {
+                keys[key] = false;
+            }
+            if (hero) hero.isDashing = false;
+        });
+
+        function setWeapon(key) {
+            if (!Weapons[key]) return;
+            currentWeaponKey = key;
+            const wpn = Weapons[key];
+            document.getElementById('hud-weapon-name').innerText = wpn.name;
+            document.querySelectorAll('.weapon-btn').forEach(b => {
+                b.classList.toggle('tool-btn-active', b.dataset.wpn === key);
+            });
+        }
+
+        function tryDash() {
+            const time = clock.getElapsedTime();
+            if (time - hero.lastDash < hero.dashCd || gameState.paused || gameState.gameOver || hero.isDashing) return;
+            hero.lastDash = time;
+            hero.isDashing = true;
+            hero.iFrames = hero.dashDuration + 0.1;
+            sfx.dash();
+
+            let dx = 0, dz = 0;
+            if (keys['KeyW'] || keys['ArrowUp']) dz -= 1;
+            if (keys['KeyS'] || keys['ArrowDown']) dz += 1;
+            if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
+            if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
+            if (dx === 0 && dz === 0) dz = -1;
+
+            const len = Math.hypot(dx, dz);
+            hero.dashDir = { x: dx / len, z: dz / len };
+            spawnImpactParticles(hero.x, 0.8, hero.z, 0x38bdf8, 14);
+        }
+
+        function tryNova() {
+            const time = clock.getElapsedTime();
+            if (time - hero.lastNova < hero.novaCd || gameState.paused || gameState.gameOver) return;
+            hero.lastNova = time;
+            sfx.nova();
+            spawnImpactParticles(hero.x, 0.4, hero.z, 0x06b6d4, 30);
+            ecs.query('enemy', 'transform').forEach(e => {
+                const en = e.c.enemy, tr = e.c.transform;
+                if (Math.hypot(tr.x - hero.x, tr.z - hero.z) <= 9.0) {
+                    en.hp -= hero.damage * 1.5; en.frozenTimer = 3.5;
+                    e.c.mesh.obj.traverse(child => {
+                        if (child.isMesh && child.material) {
+                            if (!child._sharedMat) child._sharedMat = child.material;
+                            child.material = child._sharedMat.clone();
+                            child.material.color.setHex(0x06b6d4);
+                            child._needsMatDispose = true;
+                        }
+                    });
+                    spawnDamageText(hero.damage * 1.5, tr.x, tr.z, false, false);
+                }
+            });
+        }
+
+        function shootProjectiles(target) {
+            const wpn = Weapons[currentWeaponKey];
+            sfx.shoot(currentWeaponKey);
+            const dirX = target.x - hero.x, dirZ = target.z - hero.z;
+            const baseAngle = Math.atan2(dirZ, dirX);
+            const heroAngle = hero.mesh.rotation.y;
+            const localRifleX = 0.18, localRifleZ = 1.25;
+            const muzzleX = hero.x + localRifleX * Math.cos(heroAngle) + localRifleZ * Math.sin(heroAngle);
+            const muzzleZ = hero.z - localRifleX * Math.sin(heroAngle) + localRifleZ * Math.cos(heroAngle);
+            const muzzleY = 1.12;
+
+            spawnImpactParticles(muzzleX, muzzleY, muzzleZ, currentWeaponKey === 'plasma' ? 0x38bdf8 : 0xfde047, 4);
+            hero.recoil = 0.14;
+
+            const totalProjectiles = Math.max(1, hero.projectileCount + (wpn.count - 1));
+            for (let i = 0; i < totalProjectiles; i++) {
+                const spreadAngle = (i - (totalProjectiles - 1) / 2) * (wpn.spread || 0.15);
+                const angle = baseAngle + spreadAngle + (Math.random() - 0.5) * 0.04;
+                
+                let pMesh;
+                if (assetManager.has('projectile')) {
+                    pMesh = assetManager.instantiate('projectile');
+                } else if (currentWeaponKey === 'plasma') {
+                    pMesh = new THREE.Mesh(defaultProjGeo, plasmaProjMat);
+                } else if (currentWeaponKey === 'grenade') {
+                    pMesh = new THREE.Mesh(grenadeProjGeo, grenadeProjMat);
+                } else {
+                    pMesh = new THREE.Mesh(defaultProjGeo, defaultProjMat);
+                }
+
+                pMesh.position.set(muzzleX, muzzleY, muzzleZ);
+                scene.add(pMesh);
+                const isCrit = Math.random() < hero.critChance;
+                const finalDamage = Math.round(hero.damage * wpn.dmgMult * (isCrit ? hero.critMult : 1.0));
+                
+                ecs.create()
+                   .add('transform', {x: muzzleX, y: muzzleY, z: muzzleZ})
+                   .add('velocity', {vx: Math.cos(angle) * (wpn.speed || hero.projSpeed), vy: 0, vz: Math.sin(angle) * (wpn.speed || hero.projSpeed)})
+                   .add('projectile', {
+                       dmg: finalDamage, 
+                       isCrit, 
+                       pierceLeft: hero.piercing + wpn.pierce, 
+                       hits: new Set(), 
+                       isHero: true,
+                       isExplosive: !!wpn.isExplosive,
+                       aoeRadius: wpn.aoeRadius || 4.5
+                   })
+                   .add('lifetime', {time: (wpn.range || hero.range) / (wpn.speed || hero.projSpeed)})
+                   .add('mesh', {obj: pMesh});
+            }
+        }
+
+        /* ==============================================================
+           8. АПГРЕЙДЫ И UI ТЕКСТ
+           ============================================================== */
+        const availableUpgrades = [
+            { title: 'Доп. Снаряд', desc: '+1 Снаряд ко всем атакам', icon: '🏹', apply: () => { hero.projectileCount += 1; syncEngineInputs(); } },
+            { title: 'Заточка лезвий', desc: '+35% Урона', icon: '⚔️', apply: () => { hero.damage = Math.round(hero.damage * 1.35); syncEngineInputs(); } },
+            { title: 'Глаз Сокола', desc: '+15% Крит, +45% крит урон', icon: '🎯', apply: () => { hero.critChance = Math.min(1.0, hero.critChance + 0.15); hero.critMult += 0.45; syncEngineInputs(); } },
+            { title: 'Ловкость стрелка', desc: '+25% к Скорости атаки', icon: '⚡', apply: () => { hero.attackCd = Math.max(0.06, hero.attackCd * 0.78); syncEngineInputs(); } },
+            { title: 'Бронебойные патроны', desc: '+2 Пробивания препятствий', icon: '🔱', apply: () => { hero.piercing += 2; syncEngineInputs(); } },
+            { title: 'Сердце Титана', desc: '+50 Max HP и полное лечение', icon: '💖', apply: () => { hero.maxHp += 50; hero.hp = hero.maxHp; updateHeroHpUI(); } },
+            { title: 'Сапоги Ветра', desc: '+20% Скорость бега', icon: '🥾', apply: () => { hero.speed *= 1.2; syncEngineInputs(); } }
+        ];
+
+        function addXp(amount) {
+            gameState.xp += amount;
+            while (gameState.xp >= gameState.xpNeeded) {
+                gameState.xp -= gameState.xpNeeded; 
+                gameState.level++; 
+                gameState.xpNeeded = Math.round(gameState.xpNeeded * 1.45); 
+                triggerLevelUp();
+            }
+            document.getElementById('xp-bar').style.width = `${(gameState.xp / gameState.xpNeeded) * 100}%`;
+            document.getElementById('hud-level').innerText = gameState.level;
+            document.getElementById('hud-score').innerText = gameState.score;
+        }
+
+        function triggerLevelUp() {
+            gameState.paused = true; 
+            sfx.lvlUp();
+            const modal = document.getElementById('levelup-modal');
+            const cards = document.getElementById('upgrade-cards');
+            cards.innerHTML = '';
+            [...availableUpgrades].sort(() => 0.5 - Math.random()).slice(0, 3).forEach(upg => {
+                const card = document.createElement('div');
+                card.className = 'upgrade-card glass-panel p-6 rounded-2xl cursor-pointer text-center flex flex-col items-center justify-between border-2 border-slate-700/60';
+                card.innerHTML = `<div class="text-5xl mb-4">${upg.icon}</div><div class="text-lg font-black text-sky-300 mb-2">${upg.title}</div><div class="text-xs text-slate-300 mb-6">${upg.desc}</div><button class="w-full py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm rounded-xl transition">ВЫБРАТЬ</button>`;
+                card.onclick = () => { upg.apply(); modal.classList.add('hidden'); gameState.paused = false; };
+                cards.appendChild(card);
+            });
+            modal.classList.remove('hidden');
+        }
+
+        function spawnDamageText(amount, x, z, isHeroTaking, isCrit = false, isHeal = false) {
+            const el = document.createElement('div');
+            el.className = 'floating-damage' + (isCrit ? ' damage-crit' : '') + (isHeal ? ' damage-heal' : '');
+            if (!isCrit && !isHeal) el.style.color = isHeroTaking ? '#f43f5e' : '#ffffff';
+            el.textContent = typeof amount === 'number' ? Math.round(amount) : amount;
+            uiContainer.appendChild(el);
+            ecs.create()
+               .add('transform', {x, y: isHeroTaking ? 2.4 : 1.4, z})
+               .add('floatingText', {el, isHp: false})
+               .add('lifetime', {time: 0.85});
+        }
+
+        function updateHeroHpUI() {
+            document.getElementById('hero-hp-fill').style.width = `${Math.max(0, (hero.hp / hero.maxHp) * 100)}%`;
+            document.getElementById('hero-hp-text').innerText = `${Math.ceil(hero.hp)} / ${hero.maxHp}`;
+            if (hero.hp <= 0 && !gameState.gameOver && !engineConfig.godMode) {
+                gameState.gameOver = true;
+                document.getElementById('game-over-stats').innerText = `Волна: ${gameState.wave} | Счёт: ${gameState.score} | Убито: ${gameState.enemiesKilled}`;
+                document.getElementById('game-over-screen').classList.remove('hidden');
+            }
+        }
+
+        /* ==============================================================
+           9. ИНТЕРАКТИВНЫЙ РЕДАКТОР СЦЕНЫ И РЕЙКАСТИНГ (LEVEL EDITOR)
+           ============================================================== */
+        let activeTool = 'select'; // 'select', 'wall', 'barrel', 'crate', 'shrine', 'pillar'
+        let selectedEntity = null;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const planeY0 = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const intersectPoint = new THREE.Vector3();
+
+        document.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('tool-btn-active'));
+                btn.classList.add('tool-btn-active');
+                activeTool = btn.dataset.tool;
+                document.getElementById('editor-mode-badge').innerText = activeTool.toUpperCase();
+                placementCursor.visible = (activeTool !== 'select');
+            };
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (currentMode !== AppMode.DEV_EDITOR && activeTool === 'select') return;
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            if (raycaster.ray.intersectPlane(planeY0, intersectPoint)) {
+                let px = intersectPoint.x;
+                let pz = intersectPoint.z;
+                if (engineConfig.gridSnap) {
+                    px = Math.round(px);
+                    pz = Math.round(pz);
+                }
+                placementCursor.position.set(px, 0.05, pz);
+            }
+        });
+
+        // Клик на сцене для размещения или выделения
+        window.addEventListener('pointerdown', e => {
+            if (e.target.closest('#engine-panel') || e.target.closest('#main-menu') || e.target.closest('#settings-modal') || e.target.closest('#levelup-modal')) return;
+            if (currentMode !== AppMode.DEV_EDITOR) return;
+
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            if (activeTool === 'select') {
+                // Ищем пересечения с мешами на сцене
+                const meshes = ecs.query('mesh').map(e => e.c.mesh.obj);
+                const intersects = raycaster.intersectObjects(meshes, true);
+                if (intersects.length > 0) {
+                    let hitMesh = intersects[0].object;
+                    while (hitMesh && !hitMesh.userData.entityId && hitMesh.parent) {
+                        hitMesh = hitMesh.parent;
+                    }
+                    if (hitMesh && hitMesh.userData.entityId) {
+                        const ent = ecs.entities.find(e => e.id === hitMesh.userData.entityId);
+                        if (ent) selectEntity(ent);
+                    }
+                } else {
+                    selectEntity(null);
+                }
+            } else {
+                // Размещение префаба
+                if (raycaster.ray.intersectPlane(planeY0, intersectPoint)) {
+                    let px = intersectPoint.x;
+                    let pz = intersectPoint.z;
+                    if (engineConfig.gridSnap) {
+                        px = Math.round(px);
+                        pz = Math.round(pz);
+                    }
+                    const ent = spawnProp(activeTool, px, pz);
+                    selectEntity(ent);
+                }
+            }
+        });
+
+        function selectEntity(ent) {
+            selectedEntity = ent;
+            const emptyEl = document.getElementById('inspector-empty');
+            const contentEl = document.getElementById('inspector-content');
+
+            if (!ent) {
+                emptyEl.classList.remove('hidden');
+                contentEl.classList.add('hidden');
+                selectionBox.visible = false;
+                return;
+            }
+
+            emptyEl.classList.add('hidden');
+            contentEl.classList.remove('hidden');
+
+            const tr = ent.c.transform;
+            const meshObj = ent.c.mesh.obj;
+            selectionBox.setFromObject(meshObj);
+            selectionBox.visible = true;
+
+            const name = ent.has('obstacle') ? `Префаб [${ent.c.obstacle.type}] #${ent.id}` : (ent.has('enemy') ? `Враг [${ent.c.enemy.type}] #${ent.id}` : `Сущность #${ent.id}`);
+            document.getElementById('insp-entity-name').innerText = name;
+            document.getElementById('insp-pos-x').value = tr.x.toFixed(1);
+            document.getElementById('insp-pos-y').value = tr.y.toFixed(1);
+            document.getElementById('insp-pos-z').value = tr.z.toFixed(1);
+
+            const scale = tr.scale || { x: meshObj.scale.x, y: meshObj.scale.y, z: meshObj.scale.z };
+            document.getElementById('insp-scale-x').value = scale.x.toFixed(1);
+            document.getElementById('insp-scale-y').value = scale.y.toFixed(1);
+            document.getElementById('insp-scale-z').value = scale.z.toFixed(1);
+
+            const hpRow = document.getElementById('insp-hp-row');
+            if (ent.has('obstacle') && ent.c.obstacle.isDestructible) {
+                hpRow.classList.remove('hidden');
+                document.getElementById('insp-hp').value = ent.c.obstacle.hp;
+            } else {
+                hpRow.classList.add('hidden');
+            }
+        }
+
+        // Обновление иерархии сцены
+        function updateHierarchyUI() {
+            const list = document.getElementById('hierarchy-list');
+            if (!list) return;
+            const props = ecs.query('obstacle');
+            document.getElementById('hierarchy-count').innerText = `${props.length} объектов`;
+            list.innerHTML = '';
+            props.forEach(p => {
+                const item = document.createElement('div');
+                item.className = 'p-1.5 rounded hover:bg-slate-800 cursor-pointer flex justify-between items-center transition border border-transparent hover:border-slate-700';
+                item.innerHTML = `<span>🧱 ${p.c.obstacle.type}</span><span class="text-[10px] text-slate-500 font-mono">ID:${p.id}</span>`;
+                item.onclick = () => selectEntity(p);
+                list.appendChild(item);
+            });
+        }
+
+        // Привязка инпута параметров Инспектора
+        ['x', 'y', 'z'].forEach(axis => {
+            document.getElementById(`insp-pos-${axis}`).oninput = e => {
+                if (!selectedEntity) return;
+                selectedEntity.c.transform[axis] = parseFloat(e.target.value) || 0;
+                if (selectedEntity.has('mesh')) selectedEntity.c.mesh.obj.position[axis] = selectedEntity.c.transform[axis];
+                selectionBox.setFromObject(selectedEntity.c.mesh.obj);
+            };
+            document.getElementById(`insp-scale-${axis}`).oninput = e => {
+                if (!selectedEntity || !selectedEntity.has('mesh')) return;
+                const val = Math.max(0.1, parseFloat(e.target.value) || 1);
+                selectedEntity.c.mesh.obj.scale[axis] = val;
+                if (!selectedEntity.c.transform.scale) selectedEntity.c.transform.scale = {x: 1, y: 1, z: 1};
+                selectedEntity.c.transform.scale[axis] = val;
+                selectionBox.setFromObject(selectedEntity.c.mesh.obj);
+            };
+        });
+
+        document.getElementById('insp-rot-y').oninput = e => {
+            if (!selectedEntity || !selectedEntity.has('mesh')) return;
+            const rad = (parseFloat(e.target.value) * Math.PI) / 180;
+            selectedEntity.c.transform.rotY = rad;
+            selectedEntity.c.mesh.obj.rotation.y = rad;
+            selectionBox.setFromObject(selectedEntity.c.mesh.obj);
+        };
+
+        document.getElementById('insp-color').oninput = e => {
+            if (!selectedEntity || !selectedEntity.has('mesh')) return;
+            const hex = e.target.value;
+            selectedEntity.c.mesh.obj.traverse(child => {
+                if (child.isMesh && child.material) child.material.color.set(hex);
+            });
+        };
+
+        document.getElementById('insp-hp').oninput = e => {
+            if (!selectedEntity || !selectedEntity.has('obstacle')) return;
+            selectedEntity.c.obstacle.hp = parseFloat(e.target.value) || 10;
+        };
+
+        document.getElementById('btn-insp-delete').onclick = () => {
+            if (!selectedEntity) return;
+            selectedEntity.dead = true;
+            selectEntity(null);
+            updateHierarchyUI();
+        };
+
+        document.getElementById('btn-clear-props').onclick = () => {
+            ecs.query('obstacle').forEach(o => o.dead = true);
+            selectEntity(null);
+            updateHierarchyUI();
+        };
+
+        document.getElementById('btn-generate-arena').onclick = () => {
+            ecs.query('obstacle').forEach(o => o.dead = true);
+            const count = 14;
+            const types = ['wall', 'pillar', 'barrel', 'crate', 'shrine'];
+            for (let i = 0; i < count; i++) {
+                const rx = Math.round((Math.random() * 2 - 1) * (engineConfig.arenaSize - 6));
+                const rz = Math.round((Math.random() * 2 - 1) * (engineConfig.arenaSize - 6));
+                if (Math.hypot(rx, rz) < 4) continue;
+                const pick = types[Math.floor(Math.random() * types.length)];
+                spawnProp(pick, rx, rz);
+            }
+            updateHierarchyUI();
+        };
+
+        /* ==============================================================
+           10. JSON СЕРИАЛИЗАЦИЯ (IMPORT / EXPORT ПРОЕКТА)
+           ============================================================== */
+        document.getElementById('btn-export-config').onclick = () => {
+            const propsData = ecs.query('obstacle', 'transform').map(p => ({
+                type: p.c.obstacle.type,
+                x: p.c.transform.x,
+                y: p.c.transform.y,
+                z: p.c.transform.z,
+                scale: p.c.transform.scale || { x: 1, y: 1, z: 1 },
+                hp: p.c.obstacle.hp,
+                color: p.c.mesh.obj.material ? '#' + p.c.mesh.obj.material.color.getHexString() : null
+            }));
+
+            const projectData = {
+                version: '2.5',
+                engineConfig,
+                hero: {
+                    damage: hero.damage,
+                    maxHp: hero.maxHp,
+                    speed: hero.speed,
+                    critChance: hero.critChance,
+                    projectileCount: hero.projectileCount,
+                    piercing: hero.piercing,
+                    attackCd: hero.attackCd,
+                    currentWeapon: currentWeaponKey
+                },
+                gameState: {
+                    wave: gameState.wave,
+                    waveTime: gameState.waveTime
+                },
+                props: propsData
+            };
+
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projectData, null, 2));
+            const dl = document.createElement('a');
+            dl.setAttribute("href", dataStr);
+            dl.setAttribute("download", `survival_arena_level_${Date.now()}.json`);
+            dl.click();
+            dl.remove();
+        };
+
+        document.getElementById('btn-import-config').onclick = () => document.getElementById('file-import').click();
+        document.getElementById('file-import').onchange = e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+                try {
+                    const data = JSON.parse(ev.target.result);
+                    if (data.engineConfig) Object.assign(engineConfig, data.engineConfig);
+                    if (data.hero) {
+                        Object.assign(hero, data.hero);
+                        hero.hp = hero.maxHp;
+                        if (data.hero.currentWeapon) setWeapon(data.hero.currentWeapon);
+                    }
+                    if (data.gameState) Object.assign(gameState, data.gameState);
+
+                    // Очищаем и спавним сохранённые пропсы
+                    ecs.query('obstacle').forEach(o => o.dead = true);
+                    if (Array.isArray(data.props)) {
+                        data.props.forEach(p => {
+                            spawnProp(p.type, p.x, p.z, p.scale, p.color, p.hp);
+                        });
+                    }
+                    rebuildArena(engineConfig.arenaSize);
+                    syncEngineInputs();
+                    updateHeroHpUI();
+                    updateHierarchyUI();
+                    alert('Уровень и параметры движка успешно загружены!');
+                } catch(err) {
+                    alert('Ошибка парсинга JSON файла уровня: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        };
+
+        /* ==============================================================
+           11. СВЯЗКА UI, ПРЕСЕТЫ И РЕЖИМЫ ИГРЫ
+           ============================================================== */
+        function updateAssetUI() {
+            const keys = ['hero', 'projectile', 'swarmer', 'shooter', 'brute', 'boss'];
+            let cachedCount = 0;
+            keys.forEach(key => {
+                const badge = document.getElementById(`badge-model-${key}`);
+                if (!badge) return;
+                if (assetManager.has(key)) {
+                    cachedCount++;
+                    const stats = assetManager.getStats(key);
+                    const asset = assetManager.cache.get(key);
+                    const animCount = (asset && asset.animations) ? asset.animations.length : 0;
+                    const animText = animCount > 0 ? `🎬 ${animCount}` : '🚶 Базовая';
+                    const polyText = stats ? `${(stats.triangles/1000).toFixed(1)}k △` : 'OK';
+                    badge.innerText = `✓ ${polyText} [${animText}]`;
+                    badge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-700/60 font-mono font-bold';
+                } else {
+                    badge.innerText = 'Дефолт';
+                    badge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono';
+                }
+            });
+            const totalEl = document.getElementById('cache-total-assets');
+            if (totalEl) totalEl.innerText = `Кэш: ${cachedCount} моделей`;
+        }
+
+        function setupAssetUploader(inputId, key, targetHeight, onLoaded = null) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+            input.addEventListener('change', async e => {
+                const file = e.target.files[0];
+                if (!file) return;
+                try {
+                    await assetManager.loadModel(key, file, targetHeight, file.name);
+                    updateAssetUI();
+                    if (onLoaded) onLoaded();
+                } catch (err) {
+                    alert(`Не удалось загрузить 3D-модель для [${key}]: ${err.message}`);
+                }
+            });
+        }
+
+        setupAssetUploader('upload-hero-model', 'hero', 1.8, () => {
+            const newMesh = assetManager.instantiate('hero');
+            if (newMesh) {
+                scene.remove(hero.mesh);
+                disposeObject(hero.mesh, hero.mesh.userData && hero.mesh.userData.hasCustomAnim);
+                hero.mesh = newMesh;
+                hero.mesh.position.set(hero.x, 0, hero.z);
+                scene.add(hero.mesh);
+            }
+        });
+
+        document.getElementById('btn-reset-hero-model').onclick = () => {
+            assetManager.unload('hero');
+            scene.remove(hero.mesh);
+            disposeObject(hero.mesh, hero.mesh.userData && hero.mesh.userData.hasCustomAnim);
+            hero.mesh = createHeroMeshDefault();
+            hero.mesh.position.set(hero.x, 0, hero.z);
+            scene.add(hero.mesh);
+            const inp = document.getElementById('upload-hero-model');
+            if (inp) inp.value = '';
+            updateAssetUI();
+        };
+
+        setupAssetUploader('upload-proj-model', 'projectile', 0.6);
+        document.getElementById('btn-reset-proj-model').onclick = () => {
+            assetManager.unload('projectile');
+            const inp = document.getElementById('upload-proj-model');
+            if (inp) inp.value = '';
+            updateAssetUI();
+        };
+
+        setupAssetUploader('upload-enemy-swarmer', 'swarmer', enemyTypes.swarmer.height);
+        setupAssetUploader('upload-enemy-shooter', 'shooter', enemyTypes.shooter.height);
+        setupAssetUploader('upload-enemy-brute', 'brute', enemyTypes.brute.height);
+        setupAssetUploader('upload-enemy-boss', 'boss', enemyTypes.boss.height);
+
+        document.getElementById('btn-reset-all-enemies').onclick = () => {
+            ['swarmer', 'shooter', 'brute', 'boss'].forEach(k => {
+                assetManager.unload(k);
+                const inp = document.getElementById(`upload-enemy-${k}`);
+                if (inp) inp.value = '';
+            });
+            updateAssetUI();
+        };
+
+        const mainMenu = document.getElementById('main-menu'), gameplayHud = document.getElementById('gameplay-hud');
+        const settingsModal = document.getElementById('settings-modal'), enginePanel = document.getElementById('engine-panel');
+        
+        function openMainMenu() { 
+            currentMode = AppMode.MENU; 
+            gameState.paused = true; 
+            mainMenu.classList.remove('hidden'); 
+            gameplayHud.classList.add('hidden'); 
+            enginePanel.classList.add('hidden'); 
+            document.getElementById('game-over-screen').classList.add('hidden'); 
+        }
+
+        document.getElementById('menu-btn-play').onclick = () => { 
+            currentMode = AppMode.PLAY; 
+            mainMenu.classList.add('hidden'); 
+            gameplayHud.classList.remove('hidden'); 
+            resetGame(); 
+            gameState.paused = false; 
+        };
+        document.getElementById('menu-btn-editor').onclick = () => { 
+            currentMode = AppMode.DEV_EDITOR; 
+            mainMenu.classList.add('hidden'); 
+            gameplayHud.classList.remove('hidden'); 
+            enginePanel.classList.remove('hidden'); 
+            resetGame(); 
+            gameState.paused = false; 
+            placementCursor.visible = (activeTool !== 'select');
+        };
+
+        document.getElementById('btn-hud-menu').onclick = document.getElementById('btn-death-menu').onclick = openMainMenu;
+        document.getElementById('menu-btn-settings').onclick = () => settingsModal.classList.remove('hidden');
+        document.getElementById('btn-close-settings').onclick = document.getElementById('btn-save-settings').onclick = () => settingsModal.classList.add('hidden');
+        document.getElementById('ctrl-volume').oninput = e => { sfx.setVolume(e.target.value / 100); document.getElementById('label-volume').innerText = e.target.value + '%'; };
+        document.getElementById('ctrl-bgm-volume').oninput = e => { sfx.setBgmVolume(e.target.value / 100); document.getElementById('label-bgm').innerText = e.target.value > 0 ? e.target.value + '%' : 'ВЫКЛ'; };
+        document.getElementById('ctrl-shadows').onchange = e => { renderer.shadowMap.enabled = e.target.checked; };
+
+        document.getElementById('tabs-container').addEventListener('click', e => {
+            if (!e.target.classList.contains('tab-btn')) return;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('engine-tab-active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+            e.target.classList.add('engine-tab-active');
+            document.getElementById(e.target.dataset.tab).classList.remove('hidden');
+        });
+
+        document.querySelectorAll('.weapon-btn').forEach(btn => {
+            btn.onclick = () => setWeapon(btn.dataset.wpn);
+        });
+
+        function syncEngineInputs() {
+            document.getElementById('ctrl-godmode').checked = engineConfig.godMode;
+            document.getElementById('ctrl-hero-dmg').value = document.getElementById('val-hero-dmg').innerText = hero.damage;
+            document.getElementById('ctrl-hero-cd').value = document.getElementById('val-hero-cd').innerText = hero.attackCd.toFixed(2);
+            document.getElementById('ctrl-hero-count').value = document.getElementById('val-hero-count').innerText = hero.projectileCount;
+            document.getElementById('ctrl-hero-pierce').value = document.getElementById('val-hero-pierce').innerText = hero.piercing;
+            document.getElementById('ctrl-hero-spd').value = document.getElementById('val-hero-spd').innerText = hero.speed.toFixed(1);
+            document.getElementById('ctrl-hero-crit').value = Math.round(hero.critChance * 100); document.getElementById('val-hero-crit').innerText = Math.round(hero.critChance * 100) + '%';
+            document.getElementById('ctrl-wave-num').value = document.getElementById('val-wave-num').innerText = document.getElementById('hud-wave').innerText = gameState.wave;
+            document.getElementById('ctrl-wave-time').value = document.getElementById('val-wave-time').innerText = gameState.waveTime;
+            document.getElementById('ctrl-spawn-rate').value = document.getElementById('val-spawn-rate').innerText = engineConfig.spawnInterval.toFixed(1);
+            document.getElementById('ctrl-enemy-hp-mult').value = engineConfig.enemyHpMult; document.getElementById('val-enemy-hp-mult').innerText = engineConfig.enemyHpMult.toFixed(1) + 'x';
+            document.getElementById('ctrl-enemy-spd-mult').value = engineConfig.enemySpdMult; document.getElementById('val-enemy-spd-mult').innerText = engineConfig.enemySpdMult.toFixed(1) + 'x';
+        }
+
+        document.getElementById('btn-toggle-engine').onclick = () => {
+            enginePanel.classList.toggle('hidden');
+            currentMode = enginePanel.classList.contains('hidden') ? AppMode.PLAY : AppMode.DEV_EDITOR;
+            placementCursor.visible = (currentMode === AppMode.DEV_EDITOR && activeTool !== 'select');
+        };
+        document.getElementById('btn-close-engine').onclick = () => {
+            enginePanel.classList.add('hidden');
+            currentMode = AppMode.PLAY;
+            placementCursor.visible = false;
+        };
+
+        document.getElementById('ctrl-godmode').onchange = e => engineConfig.godMode = e.target.checked;
+        document.getElementById('ctrl-grid-snap').onchange = e => engineConfig.gridSnap = e.target.checked;
+        document.getElementById('ctrl-hero-dmg').oninput = e => { hero.damage = parseFloat(e.target.value); document.getElementById('val-hero-dmg').innerText = hero.damage; };
+        document.getElementById('ctrl-hero-cd').oninput = e => { hero.attackCd = parseFloat(e.target.value); document.getElementById('val-hero-cd').innerText = hero.attackCd.toFixed(2); };
+        document.getElementById('ctrl-hero-count').oninput = e => { hero.projectileCount = parseInt(e.target.value); document.getElementById('val-hero-count').innerText = hero.projectileCount; };
+        document.getElementById('ctrl-hero-pierce').oninput = e => { hero.piercing = parseInt(e.target.value); document.getElementById('val-hero-pierce').innerText = hero.piercing; };
+        document.getElementById('ctrl-hero-spd').oninput = e => { hero.speed = parseFloat(e.target.value); document.getElementById('val-hero-spd').innerText = hero.speed.toFixed(1); };
+        document.getElementById('ctrl-hero-crit').oninput = e => { hero.critChance = parseInt(e.target.value) / 100; document.getElementById('val-hero-crit').innerText = e.target.value + '%'; };
+        document.getElementById('btn-heal-full').onclick = () => { hero.hp = hero.maxHp; updateHeroHpUI(); };
+        document.getElementById('btn-force-lvl').onclick = () => triggerLevelUp();
+        document.getElementById('ctrl-wave-num').oninput = e => { gameState.wave = parseInt(e.target.value); gameState.waveTimer = gameState.waveTime; syncEngineInputs(); };
+        document.getElementById('ctrl-wave-time').oninput = e => { gameState.waveTime = parseInt(e.target.value); document.getElementById('val-wave-time').innerText = e.target.value; };
+        document.getElementById('ctrl-spawn-rate').oninput = e => { engineConfig.spawnInterval = parseFloat(e.target.value); document.getElementById('val-spawn-rate').innerText = e.target.value; };
+        document.getElementById('ctrl-autospawn').onchange = e => engineConfig.autoSpawn = e.target.checked;
+        document.getElementById('btn-next-wave').onclick = () => { gameState.wave++; gameState.waveTimer = gameState.waveTime; syncEngineInputs(); };
+        document.querySelectorAll('.btn-spawn-type').forEach(btn => btn.onclick = () => spawnEnemy(btn.dataset.type));
+        document.getElementById('ctrl-enemy-hp-mult').oninput = e => { engineConfig.enemyHpMult = parseFloat(e.target.value); document.getElementById('val-enemy-hp-mult').innerText = e.target.value + 'x'; };
+        document.getElementById('ctrl-enemy-spd-mult').oninput = e => { 
+            engineConfig.enemySpdMult = parseFloat(e.target.value); 
+            document.getElementById('val-enemy-spd-mult').innerText = e.target.value + 'x'; 
+            ecs.query('enemy').forEach(e => e.c.enemy.spd = enemyTypes[e.c.enemy.type].spd * engineConfig.enemySpdMult); 
+        };
+        document.getElementById('btn-kill-all').onclick = () => { 
+            ecs.query('enemy').forEach(e => e.dead = true); 
+            document.getElementById('hud-enemies').innerText = 0; 
+        };
+        document.getElementById('ctrl-arena-size').oninput = e => { 
+            const sz = parseInt(e.target.value); 
+            document.getElementById('val-arena-size').innerText = sz; 
+            rebuildArena(sz); 
+        };
+        document.getElementById('ctrl-cam-height').oninput = e => { engineConfig.cameraOffset.y = parseFloat(e.target.value); document.getElementById('val-cam-height').innerText = e.target.value; };
+        document.getElementById('ctrl-cam-dist').oninput = e => { engineConfig.cameraOffset.z = parseFloat(e.target.value); document.getElementById('val-cam-dist').innerText = e.target.value; };
+        document.getElementById('ctrl-sun-light').oninput = e => { sun.intensity = parseFloat(e.target.value); document.getElementById('val-sun-light').innerText = e.target.value; };
+        document.getElementById('ctrl-grid-color').oninput = e => { 
+            disposeObject(gridHelper, true); 
+            gridHelper = new THREE.GridHelper(engineConfig.arenaSize * 2, Math.round(engineConfig.arenaSize * 2), new THREE.Color(e.target.value), 0x1e293b); 
+            gridHelper.position.y = 0.02; 
+            scene.add(gridHelper); 
+        };
+        document.getElementById('ctrl-fog-color').oninput = e => { 
+            const col = new THREE.Color(e.target.value); 
+            scene.background = scene.fog.color = col; 
+        };
+
+        const pauseBtn = document.getElementById('btn-pause-engine');
+        pauseBtn.onclick = () => { 
+            gameState.paused = !gameState.paused; 
+            pauseBtn.innerText = gameState.paused ? '▶ Старт' : '⏸ Пауза'; 
+            pauseBtn.className = gameState.paused ? 'px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-xs font-bold rounded-lg text-white' : 'px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-lg'; 
+        };
+
+        // Пошаговый запуск (Step-by-step frame)
+        document.getElementById('btn-step-frame').onclick = () => {
+            if (!gameState.paused) {
+                gameState.paused = true;
+                pauseBtn.innerText = '▶ Старт';
+            }
+            stepSingleFrame(0.016);
+        };
+
+        document.getElementById('preset-bullet-hell').onclick = () => { 
+            setWeapon('plasma');
+            hero.damage = 22; 
+            hero.attackCd = 0.08; 
+            hero.projectileCount = 6; 
+            hero.piercing = 4; 
+            hero.speed = 10; 
+            engineConfig.spawnInterval = 0.35; 
+            engineConfig.enemySpdMult = 1.3; 
+            rebuildArena(35); 
+            syncEngineInputs(); 
+        };
+        document.getElementById('preset-boss-rush').onclick = () => { 
+            setWeapon('shotgun');
+            document.getElementById('btn-kill-all').click(); 
+            spawnEnemy('boss'); 
+            spawnEnemy('boss'); 
+            engineConfig.autoSpawn = document.getElementById('ctrl-autospawn').checked = false; 
+            hero.damage = 75; 
+            hero.projectileCount = 3; 
+            hero.attackCd = 0.3; 
+            syncEngineInputs(); 
+        };
+        document.getElementById('preset-hardcore').onclick = () => { 
+            setWeapon('rifle');
+            hero.maxHp = hero.hp = 50; 
+            hero.damage = 22; 
+            hero.projectileCount = 1; 
+            hero.piercing = 0; 
+            hero.attackCd = 0.6; 
+            engineConfig.enemyHpMult = 1.5; 
+            engineConfig.enemySpdMult = 1.4; 
+            rebuildArena(18); 
+            updateHeroHpUI(); 
+            syncEngineInputs(); 
+        };
+
+        /* ==============================================================
+           12. ГЛАВНЫЙ ИГРОВОЙ ЦИКЛ И СИСТЕМЫ ФИЗИКИ
+           ============================================================== */
+        const clock = new THREE.Clock();
+        const projVec = new THREE.Vector3();
+        let frameCount = 0, lastFpsUpdate = 0;
+
+        function stepSingleFrame(dt) {
+            const time = clock.getElapsedTime();
+            updateSimulation(dt, time);
+        }
+
+        function updateSimulation(dt, time) {
+            updateWaveSystem(dt, time);
+            hero.mesh.visible = hero.iFrames > 0 && !engineConfig.godMode ? Math.floor(time * 20) % 2 === 0 : true;
+            if (hero.iFrames > 0 && !engineConfig.godMode) hero.iFrames -= dt;
+
+            // Движение героя
+            let isMoving = false;
+            let moveDx = 0, moveDz = 0;
+
+            if (hero.isDashing) {
+                if (time - hero.lastDash > hero.dashDuration) {
+                    hero.isDashing = false;
+                } else {
+                    hero.x += hero.dashDir.x * (hero.speed * 3.2) * dt;
+                    hero.z += hero.dashDir.z * (hero.speed * 3.2) * dt;
+                    hero.mesh.rotation.y = Math.atan2(hero.dashDir.x, hero.dashDir.z);
+                    isMoving = true;
+                }
+            }
+            
+            if (!hero.isDashing) {
+                if (keys['KeyW'] || keys['ArrowUp']) moveDz -= 1;
+                if (keys['KeyS'] || keys['ArrowDown']) moveDz += 1;
+                if (keys['KeyA'] || keys['ArrowLeft']) moveDx -= 1;
+                if (keys['KeyD'] || keys['ArrowRight']) moveDx += 1;
+                if (moveDx !== 0 || moveDz !== 0) {
+                    isMoving = true;
+                    const len = Math.hypot(moveDx, moveDz);
+                    hero.x += (moveDx / len) * hero.speed * dt;
+                    hero.z += (moveDz / len) * hero.speed * dt;
+                    hero.mesh.rotation.y = Math.atan2(moveDx, moveDz);
+                }
+            }
+
+            // Коллизии игрока с препятствиями (Obstacle Colliders)
+            ecs.query('obstacle', 'transform').forEach(o => {
+                const tr = o.c.transform, obs = o.c.obstacle;
+                const d = Math.hypot(hero.x - tr.x, hero.z - tr.z);
+                const minD = hero.radius + obs.radius;
+                if (d < minD && d > 0.0001) {
+                    const push = minD - d;
+                    hero.x += ((hero.x - tr.x) / d) * push;
+                    hero.z += ((hero.z - tr.z) / d) * push;
+
+                    // Если это источник исцеления (Healing Shrine)
+                    if (obs.isHealShrine && time - obs.lastHeal > 1.5 && hero.hp < hero.maxHp) {
+                        obs.lastHeal = time;
+                        hero.hp = Math.min(hero.maxHp, hero.hp + 20);
+                        sfx.heal();
+                        updateHeroHpUI();
+                        spawnDamageText("+20 HP", hero.x, hero.z, false, false, true);
+                    }
+                }
+            });
+
+            // Ограничение границами арены
+            const bound = engineConfig.arenaSize - hero.radius - 0.5;
+            hero.x = Math.max(-bound, Math.min(bound, hero.x));
+            hero.z = Math.max(-bound, Math.min(bound, hero.z));
+
+            // Анимации героя
+            if (hero.mesh && hero.mesh.userData && hero.mesh.userData.mixer) {
+                hero.mesh.userData.mixer.update(dt);
+            }
+
+            if (!hero.mesh.userData || !hero.mesh.userData.hasCustomAnim) {
+                const heroBob = isMoving ? Math.sin(time * 14) * 0.04 : Math.sin(time * 3) * 0.015;
+                hero.recoil = hero.recoil ? Math.max(0, hero.recoil - dt * 3.5) : 0;
+                hero.mesh.position.set(hero.x, Math.abs(heroBob), hero.z);
+                
+                if (isMoving && !hero.isDashing) {
+                    hero.mesh.rotation.z = Math.sin(time * 14) * 0.035;
+                    hero.mesh.rotation.x = -0.06;
+                } else if (!hero.isDashing) {
+                    hero.mesh.rotation.z = 0;
+                    hero.mesh.rotation.x = 0;
+                }
+                
+                if (hero.recoil > 0) {
+                    hero.mesh.position.y += hero.recoil * 0.2;
+                    hero.mesh.rotation.x += hero.recoil * 0.4;
+                }
+            } else {
+                hero.mesh.position.set(hero.x, 0, hero.z);
+            }
+
+            // Автоприцеливание и стрельба по ближайшему врагу
+            let closest = null, minDist = Infinity;
+            ecs.query('enemy', 'transform').forEach(e => {
+                const tr = e.c.transform;
+                const dist = Math.hypot(tr.x - hero.x, tr.z - hero.z);
+                if (dist < minDist) { minDist = dist; closest = tr; }
+            });
+
+            const currentWpn = Weapons[currentWeaponKey];
+            const maxRange = currentWpn.range || hero.range;
+            if (closest && minDist <= maxRange) {
+                hero.mesh.rotation.y = Math.atan2(closest.x - hero.x, closest.z - hero.z);
+                const effectiveCd = hero.attackCd * (currentWpn.cd / 0.5);
+                if (time - hero.lastAttack > effectiveCd) {
+                    shootProjectiles(closest);
+                    hero.lastAttack = time;
+                }
+            }
+
+            ecs.update(dt, time);
+        }
+
+        function update() {
+            const dt = Math.min(clock.getDelta(), 0.1);
+            const time = clock.getElapsedTime();
+
+            frameCount++;
+            if (time - lastFpsUpdate > 0.5) { 
+                document.getElementById('hud-fps').innerText = Math.round(frameCount / (time - lastFpsUpdate)); 
+                frameCount = 0; 
+                lastFpsUpdate = time; 
+            }
+
+            if (currentMode === AppMode.MENU) {
+                camera.position.set(Math.sin(time * 0.2) * 35, 25, Math.cos(time * 0.2) * 35); 
+                camera.lookAt(0, 0, 0); 
+                return;
+            }
+
+            document.getElementById('cd-dash').innerText = hero.dashCd - (time - hero.lastDash) <= 0 ? 'ГОТОВ' : Math.max(0, hero.dashCd - (time - hero.lastDash)).toFixed(1) + 'с';
+            document.getElementById('cd-nova').innerText = hero.novaCd - (time - hero.lastNova) <= 0 ? 'ГОТОВ' : Math.max(0, hero.novaCd - (time - hero.lastNova)).toFixed(1) + 'с';
+
+            if (!gameState.paused && !gameState.gameOver) {
+                updateSimulation(dt, time);
+            }
+
+            camera.position.lerp(new THREE.Vector3(hero.x + engineConfig.cameraOffset.x, engineConfig.cameraOffset.y, hero.z + engineConfig.cameraOffset.z), 0.1);
+            camera.lookAt(hero.x, 0, hero.z);
+
+            // Если выделен объект в инспекторе — синхронизируем рамку выделения
+            if (selectedEntity && selectedEntity.has('mesh') && selectionBox.visible) {
+                selectionBox.setFromObject(selectedEntity.c.mesh.obj);
+            }
+        }
+
+        /* ==============================================================
+           13. СИСТЕМЫ ECS ДВИЖКА
+           ============================================================== */
+        // 1. Физика частиц
+        ecs.addSystem((world, dt, time) => {
+            world.query('lifetime').forEach(e => {
+                e.c.lifetime.time -= dt;
+                if (e.c.lifetime.time <= 0) e.dead = true;
+            });
+
+            world.query('particle', 'transform', 'velocity').forEach(e => {
+                e.c.velocity.vy -= 9.8 * dt;
+                e.c.transform.x += e.c.velocity.vx * dt;
+                e.c.transform.y = Math.max(0.06, e.c.transform.y + e.c.velocity.vy * dt);
+                e.c.transform.z += e.c.velocity.vz * dt;
+            });
+        });
+
+        // 2. Драгоценные камни опыта
+        ecs.addSystem((world, dt, time) => {
+            world.query('gem', 'transform', 'mesh').forEach(e => {
+                const tr = e.c.transform, d = Math.hypot(hero.x - tr.x, hero.z - tr.z);
+                e.c.mesh.obj.rotation.y += dt * 2.5;
+                if (d < 5.0) { tr.x += ((hero.x - tr.x) / d) * 14 * dt; tr.z += ((hero.z - tr.z) / d) * 14 * dt; }
+                if (d < hero.radius + 0.4) { sfx.gem(); addXp(e.c.gem.val); e.dead = true; }
+            });
+        });
+
+        // 3. ИИ врагов, коллизии с игроком, препятствиями и другими мобами
+        ecs.addSystem((world, dt, time) => {
+            if (gameState.paused || gameState.gameOver) return;
+            const bound = engineConfig.arenaSize - hero.radius - 0.5;
+            const enemies = world.query('enemy', 'transform', 'mesh', 'ui');
+            const obstacles = world.query('obstacle', 'transform');
+            
+            for (let i = 0; i < enemies.length; i++) {
+                const e = enemies[i], en = e.c.enemy, tr = e.c.transform;
+                
+                if (en.frozenTimer > 0) {
+                    en.frozenTimer -= dt;
+                    if (en.frozenTimer <= 0) {
+                        e.c.mesh.obj.traverse(child => {
+                            if (child.isMesh && child._sharedMat && child._needsMatDispose) {
+                                child.material.dispose();
+                                child.material = child._sharedMat; child._needsMatDispose = false;
+                            }
+                        });
+                    }
+                    continue;
+                }
+
+                const distHero = Math.hypot(hero.x - tr.x, hero.z - tr.z);
+                const angle = Math.atan2(hero.z - tr.z, hero.x - tr.x);
+                
+                if (en.isShooter && distHero < 14) {
+                    if (distHero < 8) { tr.x -= Math.cos(angle) * (en.spd * 0.8) * dt; tr.z -= Math.sin(angle) * (en.spd * 0.8) * dt; }
+                    if (time - en.lastShot > 2.2) {
+                        en.lastShot = time;
+                        const em = new THREE.Mesh(enemyProjGeo, enemyProjMat);
+                        em.position.set(tr.x, 1.1, tr.z); em.castShadow = true; scene.add(em);
+                        ecs.create()
+                           .add('transform', {x: tr.x, y: 1.1, z: tr.z})
+                           .add('velocity', {vx: Math.cos(angle) * 16, vy: 0, vz: Math.sin(angle) * 16})
+                           .add('projectile', {dmg: en.dmg, isHero: false, rotSpeed: (Math.random()-0.5)*12, hits: new Set()})
+                           .add('lifetime', {time: 2.5})
+                           .add('mesh', {obj: em});
+                    }
+                } else { 
+                    tr.x += Math.cos(angle) * en.spd * dt; 
+                    tr.z += Math.sin(angle) * en.spd * dt; 
+                }
+                tr.rotY = -angle + Math.PI / 2;
+
+                // Коллизии мобов с препятствиями (Walls, Barrels, Pillars)
+                for (let o of obstacles) {
+                    const oTr = o.c.transform, obs = o.c.obstacle;
+                    const d = Math.hypot(tr.x - oTr.x, tr.z - oTr.z);
+                    const minD = en.r + obs.radius;
+                    if (d < minD && d > 0.001) {
+                        const push = minD - d;
+                        tr.x += ((tr.x - oTr.x) / d) * push;
+                        tr.z += ((tr.z - oTr.z) / d) * push;
+                    }
+                }
+
+                // Взаимное расталкивание врагов (Bumping)
+                for (let j = i + 1; j < enemies.length; j++) {
+                    const e2 = enemies[j], en2 = e2.c.enemy, tr2 = e2.c.transform;
+                    const dX = tr2.x - tr.x, dZ = tr2.z - tr.z, d = Math.hypot(dX, dZ), minDist = en.r + en2.r;
+                    if (d < minDist && d > 0.001) { 
+                        const push = ((minDist - d) / 2) * 1.2; 
+                        tr.x -= (dX / d) * push; tr.z -= (dZ / d) * push; 
+                        tr2.x += (dX / d) * push; tr2.z += (dZ / d) * push; 
+                    }
+                }
+
+                tr.x = Math.max(-bound, Math.min(bound, tr.x)); 
+                tr.z = Math.max(-bound, Math.min(bound, tr.z));
+                
+                const hasMixer = e.c.mesh.obj && e.c.mesh.obj.userData && e.c.mesh.obj.userData.hasCustomAnim;
+                if (!hasMixer) {
+                    const walkCycle = Math.sin(time * (en.isBoss ? 5 : 8) + en.id);
+                    tr.y = Math.abs(walkCycle) * (en.isBoss ? 0.12 : 0.06);
+                    tr.rotZ = walkCycle * 0.06;
+                } else {
+                    tr.y = 0; tr.rotZ = 0;
+                }
+
+                // Урон герою
+                if (distHero < en.r + hero.radius && hero.iFrames <= 0 && !engineConfig.godMode) {
+                    hero.hp -= en.dmg; 
+                    hero.iFrames = 0.45; 
+                    sfx.hit();
+                    const rEl = document.getElementById('ui-root'); 
+                    rEl.classList.remove('screen-flash'); 
+                    void rEl.offsetWidth; 
+                    rEl.classList.add('screen-flash');
+                    updateHeroHpUI(); 
+                    spawnDamageText(en.dmg, hero.x, hero.z, true, false);
+                }
+            }
+        });
+
+        // 4. Снаряды, пробивание, разрушение препятствий и AoE взрывы
+        ecs.addSystem((world, dt, time) => {
+            if (gameState.paused || gameState.gameOver) return;
+            const enemies = world.query('enemy', 'transform', 'ui');
+            const obstacles = world.query('obstacle', 'transform');
+            
+            world.query('projectile', 'transform', 'velocity').forEach(p => {
+                const tr = p.c.transform, vel = p.c.velocity, proj = p.c.projectile;
+                tr.x += vel.vx * dt; 
+                tr.z += vel.vz * dt;
+                if (proj.rotSpeed) { 
+                    tr.rotX = (tr.rotX||0) + proj.rotSpeed * dt; 
+                    tr.rotY = (tr.rotY||0) + proj.rotSpeed * dt; 
+                }
+                
+                if (Math.abs(tr.x) > engineConfig.arenaSize || Math.abs(tr.z) > engineConfig.arenaSize) { 
+                    p.dead = true; 
+                    return; 
+                }
+
+                // Попадание в разрушаемые объекты (бочки, ящики, стены)
+                for (let o of obstacles) {
+                    const oTr = o.c.transform, obs = o.c.obstacle;
+                    if (Math.hypot(tr.x - oTr.x, tr.z - oTr.z) < obs.radius + 0.2) {
+                        if (obs.isDestructible) {
+                            obs.hp -= proj.dmg;
+                            sfx.hit();
+                            spawnImpactParticles(tr.x, 0.8, tr.z, 0xef4444, 5);
+                            if (obs.hp <= 0 && !o.dead) {
+                                o.dead = true;
+                                if (obs.isExplosive) {
+                                    explodeBarrel(oTr.x, oTr.z);
+                                } else {
+                                    // Ящик с припасами дает XP / лечит
+                                    spawnXpGem(oTr.x, oTr.z, 15);
+                                    sfx.gem();
+                                }
+                                updateHierarchyUI();
+                            }
+                        }
+                        if (proj.isExplosive) {
+                            explodeBarrel(tr.x, tr.z, proj.aoeRadius, proj.dmg);
+                        }
+                        p.dead = true;
+                        return;
+                    }
+                }
+
+                if (proj.isHero) {
+                    for (let e of enemies) {
+                        if (proj.hits.has(e.id) || p.dead) continue;
+                        const en = e.c.enemy, eTr = e.c.transform;
+                        if (Math.hypot(tr.x - eTr.x, tr.z - eTr.z) < en.r + 0.3) {
+                            proj.hits.add(e.id); 
+                            en.hp -= proj.dmg; 
+                            sfx.hit();
+                            spawnImpactParticles(tr.x, 0.8, tr.z, proj.isCrit ? 0xf59e0b : 0xfacc15, 6);
+                            spawnDamageText(proj.dmg, eTr.x, eTr.z, false, proj.isCrit);
+                            e.c.ui.fill.style.width = `${Math.max(0, (en.hp / en.maxHp) * 100)}%`;
+                            
+                            if (en.hp <= 0) {
+                                e.dead = true; 
+                                spawnXpGem(eTr.x, eTr.z, en.xpVal);
+                                gameState.score += en.scoreVal; 
+                                gameState.enemiesKilled++;
+                                document.getElementById('hud-enemies').innerText = world.query('enemy').length - 1;
+                            }
+
+                            if (proj.isExplosive) {
+                                explodeBarrel(tr.x, tr.z, proj.aoeRadius, proj.dmg);
+                                p.dead = true;
+                                break;
+                            }
+
+                            if (proj.pierceLeft > 0) proj.pierceLeft--;
+                            else { p.dead = true; break; }
+                        }
+                    }
+                } else {
+                    if (Math.hypot(tr.x - hero.x, tr.z - hero.z) < hero.radius + 0.25) {
+                        if (hero.iFrames <= 0 && !engineConfig.godMode) {
+                            hero.hp -= proj.dmg; 
+                            hero.iFrames = 0.45; 
+                            sfx.hit();
+                            const rEl = document.getElementById('ui-root'); 
+                            rEl.classList.remove('screen-flash'); 
+                            void rEl.offsetWidth; 
+                            rEl.classList.add('screen-flash');
+                            updateHeroHpUI(); 
+                            spawnDamageText(proj.dmg, hero.x, hero.z, true, false);
+                        }
+                        p.dead = true;
+                    }
+                }
+            });
+        });
+
+        // 5. Рендер, анимации и UI проекция на экран
+        ecs.addSystem((world, dt, time) => {
+            world.query('mesh').forEach(e => {
+                if (e.c.mesh.obj && e.c.mesh.obj.userData && e.c.mesh.obj.userData.mixer) {
+                    e.c.mesh.obj.userData.mixer.update(dt);
+                }
+            });
+
+            world.query('transform').forEach(e => {
+                const tr = e.c.transform;
+                if (e.has('mesh')) {
+                    const m = e.c.mesh.obj;
+                    m.position.set(tr.x, tr.y, tr.z);
+                    if (tr.rotX !== undefined) m.rotation.x = tr.rotX;
+                    if (tr.rotY !== undefined) m.rotation.y = tr.rotY;
+                    if (tr.rotZ !== undefined) m.rotation.z = tr.rotZ;
+                    if (tr.scale) m.scale.set(tr.scale.x, tr.scale.y, tr.scale.z);
+                }
+                if (e.has('ui') || e.has('floatingText')) {
+                    projVec.set(tr.x, tr.y + (e.has('enemy') ? e.c.enemy.height + 0.4 : 0), tr.z).project(camera);
+                    const el = e.has('ui') ? e.c.ui.bar : e.c.floatingText.el;
+                    if (projVec.z < 1) {
+                        el.style.display = 'block';
+                        el.style.left = `${(projVec.x * 0.5 + 0.5) * window.innerWidth}px`;
+                        el.style.top = `${(projVec.y * -0.5 + 0.5) * window.innerHeight}px`;
+                        if (e.has('floatingText')) el.style.opacity = Math.max(0, e.c.lifetime.time);
+                    } else el.style.display = 'none';
+                }
+                if (e.has('floatingText')) { tr.y += dt * 1.8; }
+            });
+        });
+
+        function animate() { 
+            requestAnimationFrame(animate); 
+            update(); 
+            renderer.render(scene, camera); 
+        }
+
+        function resetGame() {
+            ecs.clear();
+            document.getElementById('floating-ui-container').innerHTML = ''; // ПРИНУДИТЕЛЬНАЯ ОЧИСТКА DOM
+            hero.x = hero.z = 0; 
+            hero.maxHp = hero.hp = 100; 
+            hero.mesh.position.set(0, 0, 0); 
+            hero.isDashing = false;
+            gameState.wave = gameState.level = 1; 
+            gameState.score = gameState.xp = gameState.enemiesKilled = 0; 
+            gameState.xpNeeded = 25;
+            gameState.waveTimer = gameState.waveTime; 
+            gameState.gameOver = gameState.paused = false;
+
+            document.getElementById('hud-enemies').innerText = 0; 
+            document.getElementById('xp-bar').style.width = '0%';
+            document.getElementById('game-over-screen').classList.add('hidden'); 
+            document.getElementById('levelup-modal').classList.add('hidden');
+            
+            // Спавним стандартный набор укрытий и бочек
+            document.getElementById('btn-generate-arena').click();
+            updateHeroHpUI(); 
+            syncEngineInputs();
+        }
+
+        document.getElementById('btn-restart-death').onclick = resetGame;
+        syncEngineInputs(); 
+        updateHeroHpUI(); 
+        setWeapon('rifle');
+        animate();
+    </script>
+</body>
+</html>
